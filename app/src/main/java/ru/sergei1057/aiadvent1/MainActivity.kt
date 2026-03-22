@@ -1,14 +1,19 @@
 package ru.sergei1057.aiadvent1
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
@@ -23,10 +28,12 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -46,7 +53,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -67,6 +76,12 @@ private const val PREFS_NAME = "ai_advent_prefs"
 private const val KEY_SYSTEM_PROMPT = "system_prompt"
 private const val KEY_APPLY_SYSTEM_PROMPT = "apply_system_prompt"
 
+private fun copyTextToClipboard(context: Context, text: String) {
+    val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+    cm.setPrimaryClip(ClipData.newPlainText("Ответ", text))
+    Toast.makeText(context, "Скопировано", Toast.LENGTH_SHORT).show()
+}
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -78,8 +93,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 }
-
-
 
 private enum class AppScreen { Main, Settings }
 
@@ -138,18 +151,12 @@ fun SettingsScreen(
     onBack: () -> Unit,
     onApply: (maxTokens: Int, jsonFormat: Boolean, systemPrompt: String, applySystemPrompt: Boolean) -> Unit
 ) {
+    val keyboardController = LocalSoftwareKeyboardController.current
     var draft by remember { mutableStateOf(initialMaxTokens.toString()) }
     var jsonFormatChecked by remember { mutableStateOf(initialAnswerJsonFormat) }
     var systemPromptDraft by remember { mutableStateOf(initialSystemPrompt) }
     var applySystemPromptChecked by remember { mutableStateOf(initialApplySystemPrompt) }
     var error by remember { mutableStateOf<String?>(null) }
-
-    LaunchedEffect(initialSystemPrompt) {
-        systemPromptDraft = initialSystemPrompt
-    }
-    LaunchedEffect(initialApplySystemPrompt) {
-        applySystemPromptChecked = initialApplySystemPrompt
-    }
 
     Scaffold(
         topBar = {
@@ -170,6 +177,7 @@ fun SettingsScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
+                .imePadding()
                 .padding(horizontal = 16.dp, vertical = 12.dp)
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -184,7 +192,9 @@ fun SettingsScreen(
                 supportingText = { Text("Максимум токенов в ответе модели (1–8192)") },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 isError = error != null,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .onFocusChanged { if (it.isFocused) keyboardController?.show() },
                 singleLine = true
             )
             error?.let {
@@ -199,7 +209,9 @@ fun SettingsScreen(
                 onValueChange = { systemPromptDraft = it },
                 label = { Text("Системный промпт") },
                 placeholder = { Text("Инструкции для модели (необязательно)") },
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .onFocusChanged { if (it.isFocused) keyboardController?.show() },
                 minLines = 3,
                 maxLines = 12
             )
@@ -264,13 +276,15 @@ fun GroqChatScreen(
     applySystemPrompt: Boolean,
     onOpenSettings: () -> Unit
 ) {
+    val context = LocalContext.current
+    val keyboardController = LocalSoftwareKeyboardController.current
     val scope = rememberCoroutineScope()
     var prompt by remember { mutableStateOf("") }
     val turns = remember { mutableStateListOf<ChatTurn>() }
     val listState = rememberLazyListState()
     val isAwaitingAnswer = turns.any { it.loading }
 
-    LaunchedEffect(turns.size, turns.lastOrNull()?.loading, turns.lastOrNull()?.answer) {
+    LaunchedEffect(turns.size, turns.lastOrNull()?.loading) {
         if (turns.isNotEmpty()) {
             listState.animateScrollToItem(turns.lastIndex)
         }
@@ -286,151 +300,166 @@ fun GroqChatScreen(
                     }
                 }
             )
+        },
+        bottomBar = {
+            HorizontalDivider()
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.surface)
+                    .navigationBarsPadding()
+                    .imePadding()
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                OutlinedTextField(
+                    value = prompt,
+                    onValueChange = { prompt = it },
+                    label = { Text("Запрос") },
+                    placeholder = { Text("Введите ваш вопрос...") },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .onFocusChanged { if (it.isFocused) keyboardController?.show() },
+                    minLines = 2,
+                    maxLines = 5,
+                    enabled = !isAwaitingAnswer
+                )
+                Button(
+                    onClick = {
+                        val text = prompt.trim()
+                        if (text.isBlank()) return@Button
+                        val id = System.nanoTime()
+                        turns.add(
+                            ChatTurn(
+                                id = id,
+                                query = text,
+                                answer = "",
+                                loading = true
+                            )
+                        )
+                        prompt = ""
+                        scope.launch {
+                            val result = callGroq(
+                                prompt = text,
+                                maxTokens = maxAnswerTokens,
+                                jsonFormat = answerJsonFormat,
+                                systemPrompt = systemPrompt,
+                                applySystemPrompt = applySystemPrompt
+                            )
+                            val idx = turns.indexOfFirst { it.id == id }
+                            if (idx >= 0) {
+                                turns[idx] = turns[idx].copy(answer = result, loading = false)
+                            }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !isAwaitingAnswer && prompt.isNotBlank()
+                ) {
+                    Text("Отправить")
+                }
+            }
         }
     ) { innerPadding ->
-        Column(
+        LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding)
+                .padding(innerPadding),
+            state = listState,
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            LazyColumn(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth(),
-                state = listState,
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                if (turns.isEmpty()) {
-                    item {
+            if (turns.isEmpty()) {
+                item {
+                    Text(
+                        text = "История пуста. Введите запрос внизу — здесь появятся все сообщения текущей сессии.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            items(
+                items = turns,
+                key = { it.id }
+            ) { turn ->
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "Запрос:",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        tonalElevation = 1.dp,
+                        shape = MaterialTheme.shapes.medium
+                    ) {
                         Text(
-                            text = "История пуста. Введите запрос внизу — здесь появятся все сообщения текущей сессии.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            text = turn.query,
+                            modifier = Modifier.padding(12.dp),
+                            style = MaterialTheme.typography.bodyMedium
                         )
                     }
-                }
-                items(
-                    items = turns,
-                    key = { it.id }
-                ) { turn ->
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(
-                            text = "Запрос:",
-                            style = MaterialTheme.typography.titleSmall,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                        Surface(
-                            modifier = Modifier.fillMaxWidth(),
-                            tonalElevation = 1.dp,
-                            shape = MaterialTheme.shapes.medium
-                        ) {
-                            Text(
-                                text = turn.query,
-                                modifier = Modifier.padding(12.dp),
-                                style = MaterialTheme.typography.bodyMedium
-                            )
+                    val answerDisplayText =
+                        if (!turn.loading) {
+                            if (answerJsonFormat && !turn.answer.startsWith("Ошибка")) {
+                                formatJsonForDisplay(turn.answer)
+                            } else {
+                                turn.answer
+                            }
+                        } else {
+                            ""
                         }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         Text(
                             text = "Ответ:",
                             style = MaterialTheme.typography.titleSmall,
                             color = MaterialTheme.colorScheme.secondary
                         )
-                        Surface(
-                            modifier = Modifier.fillMaxWidth(),
-                            tonalElevation = 2.dp,
-                            shape = MaterialTheme.shapes.medium
-                        ) {
-                            if (turn.loading) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(16.dp),
-                                    horizontalArrangement = Arrangement.Center,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(24.dp),
-                                        strokeWidth = 2.dp
-                                    )
-                                }
-                            } else {
-                                val displayText =
-                                    if (answerJsonFormat && !turn.answer.startsWith("Ошибка")) {
-                                        formatJsonForDisplay(turn.answer)
-                                    } else {
-                                        turn.answer
-                                    }
-                                Text(
-                                    text = displayText,
-                                    modifier = Modifier.padding(12.dp),
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    fontFamily = if (answerJsonFormat && !turn.answer.startsWith("Ошибка")) {
-                                        FontFamily.Monospace
-                                    } else {
-                                        FontFamily.Default
-                                    }
+                        Spacer(modifier = Modifier.weight(1f))
+                        if (!turn.loading) {
+                            IconButton(
+                                onClick = { copyTextToClipboard(context, answerDisplayText) },
+                                modifier = Modifier.size(40.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.ContentCopy,
+                                    contentDescription = "Копировать ответ"
                                 )
                             }
                         }
                     }
-                }
-            }
-
-            Surface(
-                tonalElevation = 3.dp,
-                shadowElevation = 6.dp
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .navigationBarsPadding()
-                        .imePadding()
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    OutlinedTextField(
-                        value = prompt,
-                        onValueChange = { prompt = it },
-                        label = { Text("Запрос") },
-                        placeholder = { Text("Введите ваш вопрос...") },
+                    Surface(
                         modifier = Modifier.fillMaxWidth(),
-                        minLines = 2,
-                        maxLines = 5,
-                        enabled = !isAwaitingAnswer
-                    )
-                    Button(
-                        onClick = {
-                            val text = prompt.trim()
-                            if (text.isBlank()) return@Button
-                            val id = System.nanoTime()
-                            turns.add(
-                                ChatTurn(
-                                    id = id,
-                                    query = text,
-                                    answer = "",
-                                    loading = true
-                                )
-                            )
-                            prompt = ""
-                            scope.launch {
-                                val result = callGroq(
-                                    prompt = text,
-                                    maxTokens = maxAnswerTokens,
-                                    jsonFormat = answerJsonFormat,
-                                    systemPrompt = systemPrompt,
-                                    applySystemPrompt = applySystemPrompt
-                                )
-                                val idx = turns.indexOfFirst { it.id == id }
-                                if (idx >= 0) {
-                                    turns[idx] = turns[idx].copy(answer = result, loading = false)
-                                }
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        enabled = !isAwaitingAnswer && prompt.isNotBlank()
+                        tonalElevation = 2.dp,
+                        shape = MaterialTheme.shapes.medium
                     ) {
-                        Text("Отправить")
+                        if (turn.loading) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(16.dp),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(24.dp),
+                                    strokeWidth = 2.dp
+                                )
+                            }
+                        } else {
+                            Text(
+                                text = answerDisplayText,
+                                modifier = Modifier.padding(12.dp),
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontFamily = if (answerJsonFormat && !turn.answer.startsWith("Ошибка")) {
+                                    FontFamily.Monospace
+                                } else {
+                                    FontFamily.Default
+                                }
+                            )
+                        }
                     }
                 }
             }
