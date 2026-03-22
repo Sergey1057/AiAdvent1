@@ -134,8 +134,6 @@ private val httpClient = OkHttpClient.Builder()
     .proxy(Proxy(Proxy.Type.HTTP, InetSocketAddress("10.0.2.2", 12334)))
     .build()
 
-// Вставьте свой ключ с https://console.groq.com/keys
-private const val GROQ_API_KEY = "YOUR_GROQ_API_KEY_HERE"
 
 private suspend fun callGroq(prompt: String): String = withContext(Dispatchers.IO) {
     try {
@@ -156,7 +154,7 @@ private suspend fun callGroq(prompt: String): String = withContext(Dispatchers.I
         val request = Request.Builder()
             .url("https://api.groq.com/openai/v1/chat/completions")
             .post(body)
-            .addHeader("Authorization", "Bearer $GROQ_API_KEY")
+            .addHeader("Authorization", "Bearer ${BuildConfig.GROQ_API_KEY}")
             .addHeader("Content-Type", "application/json")
             .build()
 
