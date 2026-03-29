@@ -32,11 +32,15 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -77,6 +81,18 @@ private const val KEY_SYSTEM_PROMPT = "system_prompt"
 private const val KEY_APPLY_SYSTEM_PROMPT = "apply_system_prompt"
 private const val KEY_TEMPERATURE_ENABLED = "temperature_enabled"
 private const val KEY_TEMPERATURE = "temperature"
+private const val KEY_MODEL = "selected_model"
+
+private data class GroqModel(val displayName: String, val apiId: String)
+
+private val GROQ_MODELS = listOf(
+    GroqModel("GPT OSS 120B", "openai/gpt-oss-120b"),
+    GroqModel("Llama 3.3 70B Versatile", "llama-3.3-70b-versatile"),
+    GroqModel("Qwen 3 32B", "qwen/qwen3-32b"),
+    GroqModel("GPT OSS 20B", "openai/gpt-oss-20b")
+)
+
+private const val DEFAULT_MODEL_ID = "llama-3.3-70b-versatile"
 
 private fun copyTextToClipboard(context: Context, text: String) {
     val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -120,6 +136,9 @@ fun AiAdventApp() {
     var temperature by remember {
         mutableStateOf(java.lang.Float.intBitsToFloat(prefs.getInt(KEY_TEMPERATURE, java.lang.Float.floatToIntBits(1.0f))))
     }
+    var selectedModelId by remember {
+        mutableStateOf(prefs.getString(KEY_MODEL, DEFAULT_MODEL_ID) ?: DEFAULT_MODEL_ID)
+    }
     when (screen) {
         AppScreen.Main -> GroqChatScreen(
             maxAnswerTokens = maxAnswerTokens,
@@ -128,6 +147,7 @@ fun AiAdventApp() {
             applySystemPrompt = applySystemPrompt,
             temperatureEnabled = temperatureEnabled,
             temperature = temperature,
+            selectedModelId = selectedModelId,
             onOpenSettings = { screen = AppScreen.Settings }
         )
         AppScreen.Settings -> SettingsScreen(
@@ -137,19 +157,22 @@ fun AiAdventApp() {
             initialApplySystemPrompt = applySystemPrompt,
             initialTemperatureEnabled = temperatureEnabled,
             initialTemperature = temperature,
+            initialModelId = selectedModelId,
             onBack = { screen = AppScreen.Main },
-            onApply = { tokens, jsonFormat, prompt, useSystemPrompt, tempEnabled, temp ->
+            onApply = { tokens, jsonFormat, prompt, useSystemPrompt, tempEnabled, temp, modelId ->
                 maxAnswerTokens = tokens
                 answerJsonFormat = jsonFormat
                 systemPrompt = prompt
                 applySystemPrompt = useSystemPrompt
                 temperatureEnabled = tempEnabled
                 temperature = temp
+                selectedModelId = modelId
                 prefs.edit()
                     .putString(KEY_SYSTEM_PROMPT, prompt)
                     .putBoolean(KEY_APPLY_SYSTEM_PROMPT, useSystemPrompt)
                     .putBoolean(KEY_TEMPERATURE_ENABLED, tempEnabled)
                     .putInt(KEY_TEMPERATURE, java.lang.Float.floatToIntBits(temp))
+                    .putString(KEY_MODEL, modelId)
                     .apply()
                 screen = AppScreen.Main
             }
@@ -166,8 +189,9 @@ fun SettingsScreen(
     initialApplySystemPrompt: Boolean,
     initialTemperatureEnabled: Boolean,
     initialTemperature: Float,
+    initialModelId: String,
     onBack: () -> Unit,
-    onApply: (maxTokens: Int, jsonFormat: Boolean, systemPrompt: String, applySystemPrompt: Boolean, temperatureEnabled: Boolean, temperature: Float) -> Unit
+    onApply: (maxTokens: Int, jsonFormat: Boolean, systemPrompt: String, applySystemPrompt: Boolean, temperatureEnabled: Boolean, temperature: Float, modelId: String) -> Unit
 ) {
     val keyboardController = LocalSoftwareKeyboardController.current
     var draft by remember { mutableStateOf(initialMaxTokens.toString()) }
@@ -178,6 +202,11 @@ fun SettingsScreen(
     var temperatureDraft by remember { mutableStateOf(if (initialTemperature == 1.0f) "1.0" else initialTemperature.toString()) }
     var error by remember { mutableStateOf<String?>(null) }
     var temperatureError by remember { mutableStateOf<String?>(null) }
+    val selectedModel by remember {
+        mutableStateOf(GROQ_MODELS.find { it.apiId == initialModelId } ?: GROQ_MODELS[1])
+    }
+    var currentModel by remember { mutableStateOf(selectedModel) }
+    var modelDropdownExpanded by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -203,6 +232,36 @@ fun SettingsScreen(
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
+            ExposedDropdownMenuBox(
+                expanded = modelDropdownExpanded,
+                onExpandedChange = { modelDropdownExpanded = it }
+            ) {
+                OutlinedTextField(
+                    value = currentModel.displayName,
+                    onValueChange = {},
+                    readOnly = true,
+                    label = { Text("Модель") },
+                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = modelDropdownExpanded) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .menuAnchor(MenuAnchorType.PrimaryNotEditable)
+                )
+                ExposedDropdownMenu(
+                    expanded = modelDropdownExpanded,
+                    onDismissRequest = { modelDropdownExpanded = false }
+                ) {
+                    GROQ_MODELS.forEach { model ->
+                        DropdownMenuItem(
+                            text = { Text(model.displayName) },
+                            onClick = {
+                                currentModel = model
+                                modelDropdownExpanded = false
+                            },
+                            contentPadding = ExposedDropdownMenuDefaults.ItemContentPadding
+                        )
+                    }
+                }
+            }
             OutlinedTextField(
                 value = draft,
                 onValueChange = {
@@ -331,7 +390,8 @@ fun SettingsScreen(
                             systemPromptDraft,
                             applySystemPromptChecked,
                             temperatureChecked,
-                            if (temperatureChecked) tempValue ?: 1.0f else 1.0f
+                            if (temperatureChecked) tempValue ?: 1.0f else 1.0f,
+                            currentModel.apiId
                         )
                     }
                 },
@@ -343,11 +403,18 @@ fun SettingsScreen(
     }
 }
 
+private data class GroqResult(
+    val text: String,
+    val totalTokens: Int? = null
+)
+
 private data class ChatTurn(
     val id: Long,
     val query: String,
     val answer: String,
-    val loading: Boolean
+    val loading: Boolean,
+    val elapsedSeconds: Double? = null,
+    val totalTokens: Int? = null
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -359,6 +426,7 @@ fun GroqChatScreen(
     applySystemPrompt: Boolean,
     temperatureEnabled: Boolean,
     temperature: Float,
+    selectedModelId: String,
     onOpenSettings: () -> Unit
 ) {
     val context = LocalContext.current
@@ -424,6 +492,7 @@ fun GroqChatScreen(
                         )
                         prompt = ""
                         scope.launch {
+                            val startMs = System.currentTimeMillis()
                             val result = callGroq(
                                 prompt = text,
                                 maxTokens = maxAnswerTokens,
@@ -431,11 +500,18 @@ fun GroqChatScreen(
                                 systemPrompt = systemPrompt,
                                 applySystemPrompt = applySystemPrompt,
                                 temperatureEnabled = temperatureEnabled,
-                                temperature = temperature
+                                temperature = temperature,
+                                model = selectedModelId
                             )
+                            val elapsed = (System.currentTimeMillis() - startMs) / 1000.0
                             val idx = turns.indexOfFirst { it.id == id }
                             if (idx >= 0) {
-                                turns[idx] = turns[idx].copy(answer = result, loading = false)
+                                turns[idx] = turns[idx].copy(
+                                    answer = result.text,
+                                    loading = false,
+                                    elapsedSeconds = elapsed,
+                                    totalTokens = result.totalTokens
+                                )
                             }
                         }
                     },
@@ -548,6 +624,17 @@ fun GroqChatScreen(
                             )
                         }
                     }
+                    if (!turn.loading && (turn.elapsedSeconds != null || turn.totalTokens != null)) {
+                        val parts = buildList {
+                            turn.elapsedSeconds?.let { add("Время: ${"%.1f".format(it)} сек") }
+                            turn.totalTokens?.let { add("Токены: $it") }
+                        }
+                        Text(
+                            text = parts.joinToString("   "),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
             }
         }
@@ -578,11 +665,12 @@ private suspend fun callGroq(
     systemPrompt: String,
     applySystemPrompt: Boolean,
     temperatureEnabled: Boolean = false,
-    temperature: Float = 1.0f
-): String = withContext(Dispatchers.IO) {
+    temperature: Float = 1.0f,
+    model: String = DEFAULT_MODEL_ID
+): GroqResult = withContext(Dispatchers.IO) {
     val apiKey = BuildConfig.GROQ_API_KEY
     if (apiKey.isBlank()) {
-        return@withContext "Добавьте в local.properties строку GROQ_API_KEY=ваш_ключ (https://console.groq.com/keys)"
+        return@withContext GroqResult("Добавьте в local.properties строку GROQ_API_KEY=ваш_ключ (https://console.groq.com/keys)")
     }
     try {
         val messages = JSONArray()
@@ -614,7 +702,7 @@ private suspend fun callGroq(
         )
 
         val requestJson = JSONObject().apply {
-            put("model", "llama-3.3-70b-versatile")
+            put("model", model)
             put("max_tokens", maxTokens)
             put("messages", messages)
             if (temperatureEnabled) {
@@ -642,17 +730,20 @@ private suspend fun callGroq(
                 val detail = runCatching {
                     JSONObject(responseText).optJSONObject("error")?.optString("message") ?: responseText
                 }.getOrDefault(responseText)
-                return@withContext "Ошибка ${response.code}: $detail"
+                return@withContext GroqResult("Ошибка ${response.code}: $detail")
             }
 
-            JSONObject(responseText)
+            val json = JSONObject(responseText)
+            val text = json
                 .getJSONArray("choices")
                 .getJSONObject(0)
                 .getJSONObject("message")
                 .getString("content")
                 .trim()
+            val totalTokens = json.optJSONObject("usage")?.optInt("total_tokens")
+            GroqResult(text = text, totalTokens = totalTokens)
         }
     } catch (e: Exception) {
-        "Ошибка: ${e.localizedMessage}"
+        GroqResult("Ошибка: ${e.localizedMessage}")
     }
 }
