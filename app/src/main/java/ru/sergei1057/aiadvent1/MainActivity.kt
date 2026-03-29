@@ -75,6 +75,8 @@ import ru.sergei1057.aiadvent1.ui.theme.AiAdvent1Theme
 private const val PREFS_NAME = "ai_advent_prefs"
 private const val KEY_SYSTEM_PROMPT = "system_prompt"
 private const val KEY_APPLY_SYSTEM_PROMPT = "apply_system_prompt"
+private const val KEY_TEMPERATURE_ENABLED = "temperature_enabled"
+private const val KEY_TEMPERATURE = "temperature"
 
 private fun copyTextToClipboard(context: Context, text: String) {
     val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -112,12 +114,20 @@ fun AiAdventApp() {
     var screen by remember { mutableStateOf(AppScreen.Main) }
     var maxAnswerTokens by remember { mutableStateOf(1024) }
     var answerJsonFormat by remember { mutableStateOf(false) }
+    var temperatureEnabled by remember {
+        mutableStateOf(prefs.getBoolean(KEY_TEMPERATURE_ENABLED, false))
+    }
+    var temperature by remember {
+        mutableStateOf(java.lang.Float.intBitsToFloat(prefs.getInt(KEY_TEMPERATURE, java.lang.Float.floatToIntBits(1.0f))))
+    }
     when (screen) {
         AppScreen.Main -> GroqChatScreen(
             maxAnswerTokens = maxAnswerTokens,
             answerJsonFormat = answerJsonFormat,
             systemPrompt = systemPrompt,
             applySystemPrompt = applySystemPrompt,
+            temperatureEnabled = temperatureEnabled,
+            temperature = temperature,
             onOpenSettings = { screen = AppScreen.Settings }
         )
         AppScreen.Settings -> SettingsScreen(
@@ -125,15 +135,21 @@ fun AiAdventApp() {
             initialAnswerJsonFormat = answerJsonFormat,
             initialSystemPrompt = systemPrompt,
             initialApplySystemPrompt = applySystemPrompt,
+            initialTemperatureEnabled = temperatureEnabled,
+            initialTemperature = temperature,
             onBack = { screen = AppScreen.Main },
-            onApply = { tokens, jsonFormat, prompt, useSystemPrompt ->
+            onApply = { tokens, jsonFormat, prompt, useSystemPrompt, tempEnabled, temp ->
                 maxAnswerTokens = tokens
                 answerJsonFormat = jsonFormat
                 systemPrompt = prompt
                 applySystemPrompt = useSystemPrompt
+                temperatureEnabled = tempEnabled
+                temperature = temp
                 prefs.edit()
                     .putString(KEY_SYSTEM_PROMPT, prompt)
                     .putBoolean(KEY_APPLY_SYSTEM_PROMPT, useSystemPrompt)
+                    .putBoolean(KEY_TEMPERATURE_ENABLED, tempEnabled)
+                    .putInt(KEY_TEMPERATURE, java.lang.Float.floatToIntBits(temp))
                     .apply()
                 screen = AppScreen.Main
             }
@@ -148,15 +164,20 @@ fun SettingsScreen(
     initialAnswerJsonFormat: Boolean,
     initialSystemPrompt: String,
     initialApplySystemPrompt: Boolean,
+    initialTemperatureEnabled: Boolean,
+    initialTemperature: Float,
     onBack: () -> Unit,
-    onApply: (maxTokens: Int, jsonFormat: Boolean, systemPrompt: String, applySystemPrompt: Boolean) -> Unit
+    onApply: (maxTokens: Int, jsonFormat: Boolean, systemPrompt: String, applySystemPrompt: Boolean, temperatureEnabled: Boolean, temperature: Float) -> Unit
 ) {
     val keyboardController = LocalSoftwareKeyboardController.current
     var draft by remember { mutableStateOf(initialMaxTokens.toString()) }
     var jsonFormatChecked by remember { mutableStateOf(initialAnswerJsonFormat) }
     var systemPromptDraft by remember { mutableStateOf(initialSystemPrompt) }
     var applySystemPromptChecked by remember { mutableStateOf(initialApplySystemPrompt) }
+    var temperatureChecked by remember { mutableStateOf(initialTemperatureEnabled) }
+    var temperatureDraft by remember { mutableStateOf(if (initialTemperature == 1.0f) "1.0" else initialTemperature.toString()) }
     var error by remember { mutableStateOf<String?>(null) }
+    var temperatureError by remember { mutableStateOf<String?>(null) }
 
     Scaffold(
         topBar = {
@@ -243,13 +264,75 @@ fun SettingsScreen(
                     modifier = Modifier.padding(start = 4.dp)
                 )
             }
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Checkbox(
+                    checked = temperatureChecked,
+                    onCheckedChange = {
+                        temperatureChecked = it
+                        temperatureError = null
+                    }
+                )
+                Text(
+                    text = "Температура",
+                    style = MaterialTheme.typography.bodyLarge,
+                    modifier = Modifier.padding(start = 4.dp)
+                )
+            }
+            if (temperatureChecked) {
+                OutlinedTextField(
+                    value = temperatureDraft,
+                    onValueChange = { raw ->
+                        val filtered = raw.filter { ch -> ch.isDigit() || ch == '.' }
+                        val dots = filtered.count { it == '.' }
+                        if (dots <= 1) {
+                            val parts = filtered.split(".")
+                            temperatureDraft = if (parts.size == 2) {
+                                parts[0] + "." + parts[1].take(1)
+                            } else {
+                                filtered
+                            }
+                        }
+                        temperatureError = null
+                    },
+                    label = { Text("Значение температуры") },
+                    supportingText = { Text("Допустимый диапазон: 0.0–2.0") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    isError = temperatureError != null,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .onFocusChanged { if (it.isFocused) keyboardController?.show() },
+                    singleLine = true
+                )
+                temperatureError?.let {
+                    Text(
+                        text = it,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
             Button(
                 onClick = {
                     val v = draft.toIntOrNull()
+                    val tempValue = temperatureDraft.toFloatOrNull()
                     when {
                         v == null || draft.isBlank() -> error = "Введите число"
                         v !in 1..8192 -> error = "Допустимый диапазон: 1–8192"
-                        else -> onApply(v, jsonFormatChecked, systemPromptDraft, applySystemPromptChecked)
+                        temperatureChecked && (tempValue == null || temperatureDraft.isBlank()) ->
+                            temperatureError = "Введите значение"
+                        temperatureChecked && tempValue != null && tempValue !in 0.0f..2.0f ->
+                            temperatureError = "Допустимый диапазон: 0.0–2.0"
+                        else -> onApply(
+                            v,
+                            jsonFormatChecked,
+                            systemPromptDraft,
+                            applySystemPromptChecked,
+                            temperatureChecked,
+                            if (temperatureChecked) tempValue ?: 1.0f else 1.0f
+                        )
                     }
                 },
                 modifier = Modifier.fillMaxWidth()
@@ -274,6 +357,8 @@ fun GroqChatScreen(
     answerJsonFormat: Boolean,
     systemPrompt: String,
     applySystemPrompt: Boolean,
+    temperatureEnabled: Boolean,
+    temperature: Float,
     onOpenSettings: () -> Unit
 ) {
     val context = LocalContext.current
@@ -344,7 +429,9 @@ fun GroqChatScreen(
                                 maxTokens = maxAnswerTokens,
                                 jsonFormat = answerJsonFormat,
                                 systemPrompt = systemPrompt,
-                                applySystemPrompt = applySystemPrompt
+                                applySystemPrompt = applySystemPrompt,
+                                temperatureEnabled = temperatureEnabled,
+                                temperature = temperature
                             )
                             val idx = turns.indexOfFirst { it.id == id }
                             if (idx >= 0) {
@@ -489,7 +576,9 @@ private suspend fun callGroq(
     maxTokens: Int,
     jsonFormat: Boolean,
     systemPrompt: String,
-    applySystemPrompt: Boolean
+    applySystemPrompt: Boolean,
+    temperatureEnabled: Boolean = false,
+    temperature: Float = 1.0f
 ): String = withContext(Dispatchers.IO) {
     val apiKey = BuildConfig.GROQ_API_KEY
     if (apiKey.isBlank()) {
@@ -528,6 +617,9 @@ private suspend fun callGroq(
             put("model", "llama-3.3-70b-versatile")
             put("max_tokens", maxTokens)
             put("messages", messages)
+            if (temperatureEnabled) {
+                put("temperature", temperature.toDouble())
+            }
             if (jsonFormat) {
                 put(
                     "response_format",
