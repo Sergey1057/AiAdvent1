@@ -70,8 +70,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
-import java.net.InetSocketAddress
-import java.net.Proxy
+import java.util.UUID
 import org.json.JSONArray
 import org.json.JSONObject
 import ru.sergei1057.aiadvent1.ui.theme.AiAdvent1Theme
@@ -83,16 +82,29 @@ private const val KEY_TEMPERATURE_ENABLED = "temperature_enabled"
 private const val KEY_TEMPERATURE = "temperature"
 private const val KEY_MODEL = "selected_model"
 
-private data class GroqModel(val displayName: String, val apiId: String)
+private enum class LlmProvider { Groq, GigaChat }
 
-private val GROQ_MODELS = listOf(
-    GroqModel("GPT OSS 120B", "openai/gpt-oss-120b"),
-    GroqModel("Llama 3.3 70B Versatile", "llama-3.3-70b-versatile"),
-    GroqModel("Qwen 3 32B", "qwen/qwen3-32b"),
-    GroqModel("GPT OSS 20B", "openai/gpt-oss-20b")
+private data class ChatModel(
+    val provider: LlmProvider,
+    val displayName: String,
+    val apiId: String
+)
+
+private val CHAT_MODELS = listOf(
+    ChatModel(LlmProvider.Groq, "GPT OSS 120B", "openai/gpt-oss-120b"),
+    ChatModel(LlmProvider.Groq, "Llama 3.3 70B Versatile", "llama-3.3-70b-versatile"),
+    ChatModel(LlmProvider.Groq, "Qwen 3 32B", "qwen/qwen3-32b"),
+    ChatModel(LlmProvider.Groq, "GPT OSS 20B", "openai/gpt-oss-20b"),
+    ChatModel(LlmProvider.GigaChat, "GigaChat", "GigaChat"),
+    ChatModel(LlmProvider.GigaChat, "GigaChat Pro", "GigaChat-Pro"),
+    ChatModel(LlmProvider.GigaChat, "GigaChat MAX", "GigaChat-Max")
 )
 
 private const val DEFAULT_MODEL_ID = "llama-3.3-70b-versatile"
+
+private fun chatModelById(modelId: String): ChatModel =
+    CHAT_MODELS.find { it.apiId == modelId }
+        ?: CHAT_MODELS.first { it.apiId == DEFAULT_MODEL_ID }
 
 private fun copyTextToClipboard(context: Context, text: String) {
     val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -203,7 +215,7 @@ fun SettingsScreen(
     var error by remember { mutableStateOf<String?>(null) }
     var temperatureError by remember { mutableStateOf<String?>(null) }
     val selectedModel by remember {
-        mutableStateOf(GROQ_MODELS.find { it.apiId == initialModelId } ?: GROQ_MODELS[1])
+        mutableStateOf(chatModelById(initialModelId))
     }
     var currentModel by remember { mutableStateOf(selectedModel) }
     var modelDropdownExpanded by remember { mutableStateOf(false) }
@@ -250,7 +262,7 @@ fun SettingsScreen(
                     expanded = modelDropdownExpanded,
                     onDismissRequest = { modelDropdownExpanded = false }
                 ) {
-                    GROQ_MODELS.forEach { model ->
+                    CHAT_MODELS.forEach { model ->
                         DropdownMenuItem(
                             text = { Text(model.displayName) },
                             onClick = {
@@ -446,7 +458,7 @@ fun GroqChatScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("AI Chat (Groq)") },
+                title = { Text("AI Chat") },
                 actions = {
                     TextButton(onClick = onOpenSettings) {
                         Text("Настройки")
@@ -493,16 +505,29 @@ fun GroqChatScreen(
                         prompt = ""
                         scope.launch {
                             val startMs = System.currentTimeMillis()
-                            val result = callGroq(
-                                prompt = text,
-                                maxTokens = maxAnswerTokens,
-                                jsonFormat = answerJsonFormat,
-                                systemPrompt = systemPrompt,
-                                applySystemPrompt = applySystemPrompt,
-                                temperatureEnabled = temperatureEnabled,
-                                temperature = temperature,
-                                model = selectedModelId
-                            )
+                            val model = chatModelById(selectedModelId)
+                            val result = when (model.provider) {
+                                LlmProvider.GigaChat -> callGigaChat(
+                                    prompt = text,
+                                    maxTokens = maxAnswerTokens,
+                                    jsonFormat = answerJsonFormat,
+                                    systemPrompt = systemPrompt,
+                                    applySystemPrompt = applySystemPrompt,
+                                    temperatureEnabled = temperatureEnabled,
+                                    temperature = temperature,
+                                    model = model.apiId
+                                )
+                                LlmProvider.Groq -> callGroq(
+                                    prompt = text,
+                                    maxTokens = maxAnswerTokens,
+                                    jsonFormat = answerJsonFormat,
+                                    systemPrompt = systemPrompt,
+                                    applySystemPrompt = applySystemPrompt,
+                                    temperatureEnabled = temperatureEnabled,
+                                    temperature = temperature,
+                                    model = model.apiId
+                                )
+                            }
                             val elapsed = (System.currentTimeMillis() - startMs) / 1000.0
                             val idx = turns.indexOfFirst { it.id == id }
                             if (idx >= 0) {
@@ -641,10 +666,7 @@ fun GroqChatScreen(
     }
 }
 
-// 10.0.2.2 — стандартный адрес хост-машины из Android-эмулятора
-private val httpClient = OkHttpClient.Builder()
-    .proxy(Proxy(Proxy.Type.HTTP, InetSocketAddress("10.0.2.2", 12334)))
-    .build()
+private val httpClient = OkHttpClient()
 
 private fun formatJsonForDisplay(raw: String): String {
     val t = raw.trim()
@@ -721,6 +743,140 @@ private suspend fun callGroq(
             .url("https://api.groq.com/openai/v1/chat/completions")
             .post(body)
             .addHeader("Authorization", "Bearer $apiKey")
+            .addHeader("Content-Type", "application/json")
+            .build()
+
+        httpClient.newCall(request).execute().use { response ->
+            val responseText = response.body?.string() ?: ""
+            if (!response.isSuccessful) {
+                val detail = runCatching {
+                    JSONObject(responseText).optJSONObject("error")?.optString("message") ?: responseText
+                }.getOrDefault(responseText)
+                return@withContext GroqResult("Ошибка ${response.code}: $detail")
+            }
+
+            val json = JSONObject(responseText)
+            val text = json
+                .getJSONArray("choices")
+                .getJSONObject(0)
+                .getJSONObject("message")
+                .getString("content")
+                .trim()
+            val totalTokens = json.optJSONObject("usage")?.optInt("total_tokens")
+            GroqResult(text = text, totalTokens = totalTokens)
+        }
+    } catch (e: Exception) {
+        GroqResult("Ошибка: ${e.localizedMessage}")
+    }
+}
+
+private const val GIGACHAT_OAUTH_URL = "https://ngw.devices.sberbank.ru:9443/api/v2/oauth"
+private const val GIGACHAT_CHAT_URL = "https://gigachat.devices.sberbank.ru/api/v1/chat/completions"
+private const val GIGACHAT_SCOPE = "GIGACHAT_API_PERS"
+
+@Volatile
+private var gigachatTokenCache: Pair<String, Long>? = null
+
+private fun getGigaChatAccessToken(apiKey: String): String {
+    val nowMs = System.currentTimeMillis()
+    gigachatTokenCache?.let { (token, expiresMs) ->
+        if (nowMs < expiresMs - 60_000) return token
+    }
+    val body = "scope=$GIGACHAT_SCOPE"
+        .toRequestBody("application/x-www-form-urlencoded".toMediaType())
+    val request = Request.Builder()
+        .url(GIGACHAT_OAUTH_URL)
+        .post(body)
+        .addHeader("Content-Type", "application/x-www-form-urlencoded")
+        .addHeader("Accept", "application/json")
+        .addHeader("RqUID", UUID.randomUUID().toString())
+        .addHeader("Authorization", "Basic $apiKey")
+        .build()
+    httpClient.newCall(request).execute().use { response ->
+        val responseText = response.body?.string() ?: ""
+        if (!response.isSuccessful) {
+            throw RuntimeException("OAuth ${response.code}: $responseText")
+        }
+        val json = JSONObject(responseText)
+        val token = json.optString("access_token")
+        if (token.isBlank()) {
+            throw RuntimeException("В ответе OAuth нет access_token")
+        }
+        val expiresMs = when (val expiresAt = json.opt("expires_at")) {
+            is Number -> expiresAt.toLong()
+            else -> nowMs + 25 * 60 * 1000
+        }
+        gigachatTokenCache = token to expiresMs
+        return token
+    }
+}
+
+// Ключ задаётся в local.properties: GIGACHAT_API_KEY=... (https://developers.sber.ru/portal/products/gigachat-api)
+private suspend fun callGigaChat(
+    prompt: String,
+    maxTokens: Int,
+    jsonFormat: Boolean,
+    systemPrompt: String,
+    applySystemPrompt: Boolean,
+    temperatureEnabled: Boolean = false,
+    temperature: Float = 1.0f,
+    model: String = "GigaChat"
+): GroqResult = withContext(Dispatchers.IO) {
+    val apiKey = BuildConfig.GIGACHAT_API_KEY
+    if (apiKey.isBlank()) {
+        return@withContext GroqResult(
+            "Добавьте в local.properties строку GIGACHAT_API_KEY=ваш_ключ " +
+                "(https://developers.sber.ru/portal/products/gigachat-api)"
+        )
+    }
+    try {
+        val accessToken = getGigaChatAccessToken(apiKey)
+        val messages = JSONArray()
+        val systemParts = buildList {
+            val customSystem = systemPrompt.trim()
+            if (applySystemPrompt && customSystem.isNotEmpty()) add(customSystem)
+            if (jsonFormat) {
+                add(
+                    "Отвечай только валидным JSON (объект или массив). " +
+                        "Без markdown, без текста до или после JSON."
+                )
+            }
+        }
+        if (systemParts.isNotEmpty()) {
+            messages.put(
+                JSONObject().apply {
+                    put("role", "system")
+                    put("content", systemParts.joinToString("\n\n"))
+                }
+            )
+        }
+        messages.put(
+            JSONObject().apply {
+                put("role", "user")
+                put("content", prompt)
+            }
+        )
+
+        val requestJson = JSONObject().apply {
+            put("model", model)
+            put("max_tokens", maxTokens)
+            put("messages", messages)
+            if (temperatureEnabled) {
+                put("temperature", temperature.toDouble())
+            }
+            if (jsonFormat) {
+                put(
+                    "response_format",
+                    JSONObject().apply { put("type", "json_object") }
+                )
+            }
+        }
+
+        val body = requestJson.toString().toRequestBody("application/json".toMediaType())
+        val request = Request.Builder()
+            .url(GIGACHAT_CHAT_URL)
+            .post(body)
+            .addHeader("Authorization", "Bearer $accessToken")
             .addHeader("Content-Type", "application/json")
             .build()
 
