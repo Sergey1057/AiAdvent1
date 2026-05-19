@@ -373,7 +373,8 @@ def call_llm_for_review(user_message: str) -> str:
     if backend in ("groq", "local"):
         return _call_groq_chat(user_message)
 
-    model = (os.environ.get("PR_REVIEW_MODEL") or os.environ.get("GIGACHAT_MODEL") or "").strip() or None
+    # PR_REVIEW_MODEL — только для Groq; для GigaChat — GIGACHAT_MODEL (по умолчанию GigaChat).
+    model = (os.environ.get("GIGACHAT_MODEL") or "").strip() or None
     return gigachat_chat_completion(
         user_message,
         system_message=_review_system_prompt(),

@@ -1,7 +1,5 @@
-
 # AI PR review: GigaChat или Groq (см. README в deploy/ai-advent1).
 # Secrets (один из): GIGACHAT_API_KEY | GROQ_API_KEY
-
 
 name: AI PR Review
 
@@ -93,7 +91,7 @@ jobs:
       - name: Run AI code review
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GIGACHAT_MODEL: ${{ vars.PR_REVIEW_MODEL || vars.GIGACHAT_MODEL || 'GigaChat' }}
+          GIGACHAT_MODEL: ${{ vars.GIGACHAT_MODEL || 'GigaChat' }}
           GIGACHAT_SCOPE: ${{ vars.GIGACHAT_SCOPE || 'GIGACHAT_API_PERS' }}
           PR_REVIEW_MODEL: ${{ vars.PR_REVIEW_MODEL || 'llama-3.3-70b-versatile' }}
           PR_PROJECT_ROOT: ${{ github.workspace }}
