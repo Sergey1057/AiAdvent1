@@ -1,10 +1,5 @@
-# Скопируйте в AiAdvent1: .github/workflows/ai-pr-review.yml
-#
-# Требования:
-# 1. Репозиторий llm_agent на GitHub (переменная LLM_AGENT_REPOSITORY или по умолчанию Sergey1057/llm_agent)
-# 2. Secret GROQ_API_KEY (или GIGACHAT_API_KEY + LLM_AGENT_BACKEND=cloud в шаге run)
-#
-# Документация проекта: docs/ + REDME.md — индексируются в CI для RAG.
+# Self-contained AI PR review — скрипт в .github/ai-review/ (без llm_agent на GitHub).
+# Secret: GROQ_API_KEY
 
 name: AI PR Review
 
@@ -20,46 +15,20 @@ jobs:
   ai-review:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout AiAdvent1 (PR head)
+      - name: Checkout PR
         uses: actions/checkout@v4
-
-      - name: Checkout llm_agent (review engine)
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ vars.LLM_AGENT_REPOSITORY || 'Sergey1057/llm_agent' }}
-          path: llm_agent
-          ref: ${{ vars.LLM_AGENT_REF || 'main' }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-          cache: pip
-          cache-dependency-path: llm_agent/requirements.txt
 
-      - name: Install dependencies
-        working-directory: llm_agent
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+      - name: Install review script dependencies
+        run: pip install -r .github/ai-review/requirements.txt
 
-      - name: Build RAG index from docs
-        working-directory: llm_agent
-        env:
-          LLM_AGENT_PROJECT_ROOT: ${{ github.workspace }}
-        run: |
-          python -m dev_assistant --build-index --dummy-embeddings --project-root "$LLM_AGENT_PROJECT_ROOT"
-
-      - name: AI code review
-        working-directory: llm_agent
+      - name: Run AI code review
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          LLM_AGENT_PROJECT_ROOT: ${{ github.workspace }}
-          LLM_AGENT_PROJECT_RAG_INDEX: memory/index_out/project_docs_index.json
-          LLM_AGENT_RAG_LOCAL: "1"
-          LLM_AGENT_BACKEND: ${{ secrets.GROQ_API_KEY != '' && 'local' || 'cloud' }}
-          LLM_AGENT_LOCAL_BASE_URL: https://api.groq.com/openai/v1
-          LLM_AGENT_LOCAL_MODEL: ${{ vars.PR_REVIEW_MODEL || 'llama-3.3-70b-versatile' }}
-          LLM_AGENT_LOCAL_API_KEY: ${{ secrets.GROQ_API_KEY }}
-          GIGACHAT_API_KEY: ${{ secrets.GIGACHAT_API_KEY }}
-        run: python pr_code_review.py
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          PR_REVIEW_MODEL: ${{ vars.PR_REVIEW_MODEL || 'llama-3.3-70b-versatile' }}
+        run: python .github/ai-review/review_pr.py
