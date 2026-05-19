@@ -8,8 +8,10 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.tooling.preview.Preview
 
 private val DarkColorScheme = darkColorScheme(
     primary = Purple80,
@@ -55,4 +57,12 @@ fun AiAdvent1Theme(
         typography = Typography,
         content = content
     )
+}
+
+@Preview(name = "Тема", showBackground = true)
+@Composable
+private fun AiAdvent1ThemePreview() {
+    AiAdvent1Theme(dynamicColor = false) {
+        Text("AiAdvent1")
+    }
 }
