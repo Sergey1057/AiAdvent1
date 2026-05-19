@@ -2,7 +2,7 @@
 """
 Self-contained AI PR review для AiAdvent1 (без репозитория llm_agent на GitHub).
 
-Зависимости: certifi (SSL). GitHub API + Groq API через stdlib urllib.
+Зависимости: certifi, truststore (SSL для GigaChat). GitHub API + GigaChat через stdlib.
 RAG: лексический поиск по REDME.md и docs/.
 """
 
@@ -21,6 +21,8 @@ from pathlib import Path
 from typing import Any
 
 import certifi
+
+from gigachat_client import chat_completion as gigachat_chat_completion
 
 _SCRIPT_DIR = Path(__file__).resolve().parent
 _PROMPT_FILE = _SCRIPT_DIR / "prompt.txt"
@@ -91,9 +93,17 @@ def _http_post_json(url: str, headers: dict[str, str], payload: dict[str, Any]) 
     return data if isinstance(data, dict) else {"raw": data}
 
 
+def _http_get_github(url: str, token: str, *, accept: str | None = None) -> bytes:
+    try:
+        return _http_get(url, token, accept=accept)
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"GitHub API HTTP {e.code} для {url}: {body[:600]}") from e
+
+
 def fetch_pull_request_context(owner: str, repo: str, pr_number: int, token: str) -> PullRequestContext:
     base = f"https://api.github.com/repos/{owner}/{repo}"
-    pr_raw = _http_get(f"{base}/pulls/{pr_number}", token)
+    pr_raw = _http_get_github(f"{base}/pulls/{pr_number}", token)
     pr = json.loads(pr_raw.decode("utf-8"))
     if not isinstance(pr, dict):
         raise RuntimeError("Некорректный ответ GitHub API для PR.")
@@ -101,7 +111,9 @@ def fetch_pull_request_context(owner: str, repo: str, pr_number: int, token: str
     files: list[PrFileChange] = []
     page = 1
     while True:
-        files_raw = _http_get(f"{base}/pulls/{pr_number}/files?per_page=100&page={page}", token)
+        files_raw = _http_get_github(
+            f"{base}/pulls/{pr_number}/files?per_page=100&page={page}", token
+        )
         batch = json.loads(files_raw.decode("utf-8"))
         if not isinstance(batch, list) or not batch:
             break
@@ -122,12 +134,12 @@ def fetch_pull_request_context(owner: str, repo: str, pr_number: int, token: str
         page += 1
 
     try:
-        unified_diff = _http_get(
+        unified_diff = _http_get_github(
             f"{base}/pulls/{pr_number}",
             token,
             accept="application/vnd.github.diff",
         ).decode("utf-8", errors="replace")
-    except urllib.error.HTTPError:
+    except RuntimeError:
         unified_diff = _build_unified_diff_from_patches(files)
 
     base_obj = pr.get("base") if isinstance(pr.get("base"), dict) else {}
@@ -272,7 +284,7 @@ def format_changed_files_list(files: list[PrFileChange]) -> str:
     )
 
 
-def format_diff_for_prompt(ctx: PullRequestContext, *, max_chars: int = 24_000) -> str:
+def format_diff_for_prompt(ctx: PullRequestContext, *, max_chars: int = 14_000) -> str:
     diff = ctx.unified_diff.strip()
     if not diff:
         parts = []
@@ -340,40 +352,65 @@ def build_user_message(
     return msg.strip()
 
 
-def call_groq_chat(user_message: str) -> str:
+def _cap_prompt(text: str, max_chars: int = 28_000) -> str:
+    if len(text) <= max_chars:
+        return text
+    return text[: max_chars - 80] + "\n\n… (промпт обрезан для лимита модели)"
+
+
+def _review_system_prompt() -> str:
+    return (
+        "Ты опытный ревьюер Kotlin/Android. Отвечай по-русски, структурированно, "
+        "только по предоставленному контексту."
+    )
+
+
+def call_llm_for_review(user_message: str) -> str:
+    """Ревью через GigaChat (по умолчанию) или Groq (PR_REVIEW_LLM=groq)."""
+    backend = (os.environ.get("PR_REVIEW_LLM") or "gigachat").strip().lower()
+    user_message = _cap_prompt(user_message)
+
+    if backend in ("groq", "local"):
+        return _call_groq_chat(user_message)
+
+    model = (os.environ.get("PR_REVIEW_MODEL") or os.environ.get("GIGACHAT_MODEL") or "").strip() or None
+    return gigachat_chat_completion(
+        user_message,
+        system_message=_review_system_prompt(),
+        model=model,
+        temperature=0.2,
+        max_tokens=4096,
+    )
+
+
+def _call_groq_chat(user_message: str) -> str:
+    """Опциональный fallback: Groq OpenAI-compatible API."""
     api_key = (os.environ.get("GROQ_API_KEY") or "").strip()
     if not api_key:
-        raise RuntimeError("Задайте secret GROQ_API_KEY в настройках репозитория.")
+        raise RuntimeError("GROQ_API_KEY не задан (PR_REVIEW_LLM=groq).")
 
     base = (os.environ.get("GROQ_API_BASE") or "https://api.groq.com/openai/v1").rstrip("/")
     model = (os.environ.get("PR_REVIEW_MODEL") or "llama-3.3-70b-versatile").strip()
     url = f"{base}/chat/completions"
-    system = (
-        "Ты опытный ревьюер Kotlin/Android. Отвечай по-русски, структурированно, "
-        "только по предоставленному контексту."
-    )
     payload = {
         "model": model,
         "messages": [
-            {"role": "system", "content": system},
+            {"role": "system", "content": _review_system_prompt()},
             {"role": "user", "content": user_message},
         ],
         "temperature": 0.2,
         "max_tokens": 4096,
     }
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    print(f"Groq: model={model}, prompt_chars={len(user_message)}", flush=True)
     try:
         data = _http_post_json(url, headers, payload)
     except urllib.error.HTTPError as e:
         err = e.read().decode("utf-8", errors="replace")
         raise RuntimeError(f"Groq API HTTP {e.code}: {err[:800]}") from e
-
     choices = data.get("choices")
     if not isinstance(choices, list) or not choices:
-        raise RuntimeError(f"Groq API: нет choices в ответе: {json.dumps(data)[:500]}")
+        raise RuntimeError(f"Groq API: нет choices: {json.dumps(data)[:500]}")
     msg = choices[0].get("message") if isinstance(choices[0], dict) else {}
     content = msg.get("content") if isinstance(msg, dict) else ""
     if not str(content).strip():
@@ -424,22 +461,25 @@ def run_review(
     project_root: Path,
     dry_run: bool = False,
 ) -> str:
+    print(f"PR review: {owner}/{repo}#{pr_number} root={project_root}", flush=True)
     ctx = fetch_pull_request_context(owner, repo, pr_number, token)
+    print(f"PR: {ctx.title!r}, files={len(ctx.files)}, diff_chars={len(ctx.unified_diff)}", flush=True)
     query = " ".join(
         p
         for p in (
             ctx.title,
             ctx.body[:400] if ctx.body else "",
             " ".join(f.filename for f in ctx.files[:15]),
-            "android kotlin groq review",
+            "android kotlin code review",
         )
         if p
     )
     chunks = build_doc_chunks(project_root)
+    print(f"RAG: doc_chunks={len(chunks)}", flush=True)
     rag = retrieve_doc_excerpts(query, chunks)
     code = read_code_snippets(project_root, [f.filename for f in ctx.files])
     user_msg = build_user_message(ctx, rag_block=rag, code_snippets=code, project_root=project_root)
-    review = call_groq_chat(user_msg)
+    review = call_llm_for_review(user_msg)
     if dry_run:
         print(review)
     else:
@@ -480,6 +520,10 @@ def main() -> int:
         ws = (os.environ.get("GITHUB_WORKSPACE") or "").strip()
         root = Path(ws) if ws else Path.cwd()
 
+    if not _PROMPT_FILE.is_file():
+        print(f"Не найден {_PROMPT_FILE} — закоммитьте .github/ai-review/ в репозиторий.", file=sys.stderr)
+        return 1
+
     try:
         run_review(
             owner=owner,
@@ -490,8 +534,12 @@ def main() -> int:
             dry_run=args.dry_run,
         )
     except Exception as e:
+        import traceback
+
         print(f"Ошибка: {e}", file=sys.stderr)
+        traceback.print_exc()
         return 1
+    print("AI review: готово.", flush=True)
     return 0
 
 
