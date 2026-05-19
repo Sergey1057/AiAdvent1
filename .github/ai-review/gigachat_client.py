@@ -132,10 +132,24 @@ def chat_completion(
     temperature: float = 0.2,
     max_tokens: int = 4096,
 ) -> str:
-    auth_key = (os.environ.get("GIGACHAT_API_KEY") or "").strip()
+
+    auth_key = ""
+    for name in (
+        "GIGACHAT_API_KEY",
+        "GIGACHAT_AUTH_KEY",
+        "GIGACHAT_CREDENTIALS",
+        "GIGACHAT_AUTHORIZATION_KEY",
+    ):
+        auth_key = (os.environ.get(name) or "").strip()
+        if auth_key:
+            break
     if not auth_key:
         raise RuntimeError(
-            "GIGACHAT_API_KEY не задан. Добавьте secret в Settings → Secrets → Actions."
+            "GIGACHAT_API_KEY не задан в окружении runner.\n"
+            "GitHub: Settings → Secrets and variables → Actions → New repository secret\n"
+            "Имя: GIGACHAT_API_KEY (именно Secrets, не Variables)\n"
+            "Значение: Authorization key из кабинета GigaChat API (Base64).\n"
+            "CLI: gh secret set GIGACHAT_API_KEY --repo OWNER/REPO"
         )
 
     oauth_url = (os.environ.get("GIGACHAT_OAUTH_URL") or GIGACHAT_OAUTH_URL).strip()

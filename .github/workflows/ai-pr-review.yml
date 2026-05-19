@@ -1,6 +1,7 @@
-# AI PR review (GigaChat). Secret: GIGACHAT_API_KEY в Settings → Secrets → Actions.
-#
-# pull_request_target — secrets доступны и для PR из fork (скрипт только с base-ветки).
+
+# AI PR review (GigaChat)
+# Repository secret: GIGACHAT_API_KEY → Settings → Secrets and variables → Actions → Secrets
+=======
 
 name: AI PR Review
 
@@ -8,6 +9,11 @@ on:
   pull_request_target:
     types: [opened, synchronize, reopened]
   workflow_dispatch:
+
+concurrency:
+  group: ai-review-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+=======
 
 permissions:
   contents: read
@@ -24,57 +30,50 @@ jobs:
         run: |
           echo "event=${{ github.event_name }}"
           echo "repository=${{ github.repository }}"
-          if [ "${{ github.event_name }}" = "pull_request_target" ]; then
+
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
             echo "head_repo=${{ github.event.pull_request.head.repo.full_name }}"
-            echo "base_ref=${{ github.event.pull_request.base.ref }}"
-            echo "pr_number=${{ github.event.pull_request.number }}"
-          fi
-          if [ -n "${{ secrets.GIGACHAT_API_KEY }}" ]; then
-            echo "GIGACHAT_API_KEY: доступен в контексте workflow (значение скрыто)"
-          else
-            echo "::warning::GIGACHAT_API_KEY пуст в secrets — проверьте имя secret и репозиторий"
-          fi
-
-      - name: Checkout base branch (trusted review scripts)
-        if: github.event_name == 'pull_request_target'
-        uses: actions/checkout@v6
-        with:
-          ref: ${{ github.event.pull_request.base.sha }}
-          path: review-root
-
-      - name: Checkout PR code for analysis
-        if: github.event_name == 'pull_request_target'
-        uses: actions/checkout@v6
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          path: pr-src
-
-      - name: Checkout (manual run)
-        if: github.event_name == 'workflow_dispatch'
-        uses: actions/checkout@v6
-
-      - name: Resolve paths to review bundle
-        id: paths
-        run: |
-          set -e
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            ROOT="${{ github.workspace }}"
-            PROJECT="${{ github.workspace }}"
-          else
-            ROOT="${{ github.workspace }}/review-root"
-            PROJECT="${{ github.workspace }}/pr-src"
-            if [ ! -f "$ROOT/.github/ai-review/review_pr.py" ] && [ -f "$PROJECT/.github/ai-review/review_pr.py" ]; then
-              echo "::warning::Скрипт ревью только в PR-ветке — используем pr-src (смержите .github/ai-review в main)"
-              ROOT="$PROJECT"
+            echo "base_repo=${{ github.event.pull_request.base.repo.full_name }}"
+            if [ "${{ github.event.pull_request.head.repo.full_name }}" != "${{ github.repository }}" ]; then
+              echo "::warning::PR из fork — secrets репозитория недоступны. Пушьте ветку в ${{ github.repository }}."
             fi
           fi
-          test -f "$ROOT/.github/ai-review/review_pr.py" || {
-            echo "::error::Нет .github/ai-review/review_pr.py в base-ветке. Сначала смержите workflow в main."
+
+      - name: Configure GIGACHAT_API_KEY
+        env:
+          KEY: ${{ secrets.GIGACHAT_API_KEY }}
+          ALT1: ${{ secrets.GIGACHAT_AUTH_KEY }}
+          ALT2: ${{ secrets.GIGACHAT_CREDENTIALS }}
+        run: |
+          set -e
+          VAL=""
+          if [ -n "$KEY" ]; then VAL="$KEY"; fi
+          if [ -z "$VAL" ] && [ -n "$ALT1" ]; then VAL="$ALT1"; fi
+          if [ -z "$VAL" ] && [ -n "$ALT2" ]; then VAL="$ALT2"; fi
+          if [ -z "$VAL" ]; then
+            echo "::error::Не найден secret GIGACHAT_API_KEY (вкладка Secrets, не Variables)."
+            echo "::error::Создайте: https://github.com/${{ github.repository }}/settings/secrets/actions"
+            echo "::error::Или CLI: gh secret set GIGACHAT_API_KEY --repo ${{ github.repository }}"
+            if [ "${{ github.event_name }}" = "pull_request" ] && \
+               [ "${{ github.event.pull_request.head.repo.full_name }}" != "${{ github.repository }}" ]; then
+              echo "::error::PR из fork — GitHub не передаёт secrets. Создайте ветку в основном репозитории."
+            fi
+            exit 1
+          fi
+          echo "GIGACHAT_API_KEY=$VAL" >> "$GITHUB_ENV"
+          echo "GigaChat key OK (длина=${#VAL} символов)"
+
+      - name: Checkout PR
+        uses: actions/checkout@v6
+
+      - name: Verify review bundle
+        run: |
+          test -f .github/ai-review/review_pr.py || {
+            echo "::error::Нет .github/ai-review/review_pr.py"
             exit 1
           }
-          echo "review_root=$ROOT" >> "$GITHUB_OUTPUT"
-          echo "project_root=$PROJECT" >> "$GITHUB_OUTPUT"
-          ls -la "$ROOT/.github/ai-review/"
+          ls -la .github/ai-review/
+
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -82,15 +81,18 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: python -m pip install -r "${{ steps.paths.outputs.review_root }}/.github/ai-review/requirements.txt"
+
+        run: python -m pip install -r .github/ai-review/requirements.txt
+
 
       - name: Run AI code review
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GIGACHAT_API_KEY: ${{ secrets.GIGACHAT_API_KEY }}
+
           GIGACHAT_MODEL: ${{ vars.PR_REVIEW_MODEL || vars.GIGACHAT_MODEL || 'GigaChat' }}
           GIGACHAT_SCOPE: ${{ vars.GIGACHAT_SCOPE || 'GIGACHAT_API_PERS' }}
           PR_REVIEW_LLM: gigachat
-          PR_PROJECT_ROOT: ${{ steps.paths.outputs.project_root }}
-        working-directory: ${{ steps.paths.outputs.review_root }}
+          PR_PROJECT_ROOT: ${{ github.workspace }}
+
+
         run: python .github/ai-review/review_pr.py

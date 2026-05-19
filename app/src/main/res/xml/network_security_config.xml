@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Корни НУЦ Минцифры для GigaChat API: https://developers.sber.ru/docs/ru/gigachat/certificates -->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">devices.sberbank.ru</domain>
+        <domain includeSubdomains="true">sberbank.ru</domain>
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="@raw/russian_trusted_root_ca" />
+            <certificates src="@raw/russian_trusted_sub_ca" />
+        </trust-anchors>
+    </domain-config>
+</network-security-config>
