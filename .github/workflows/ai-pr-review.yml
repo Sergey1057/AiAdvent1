@@ -1,65 +1,98 @@
-# Скопируйте в AiAdvent1: .github/workflows/ai-pr-review.yml
-#
-# Требования:
-# 1. Репозиторий llm_agent на GitHub (переменная LLM_AGENT_REPOSITORY или по умолчанию Sergey1057/llm_agent)
-# 2. Secret GROQ_API_KEY (или GIGACHAT_API_KEY + LLM_AGENT_BACKEND=cloud в шаге run)
-#
-# Документация проекта: docs/ + REDME.md — индексируются в CI для RAG.
+
+# AI PR review (GigaChat)
+# Repository secret: GIGACHAT_API_KEY → Settings → Secrets and variables → Actions → Secrets
+=======
 
 name: AI PR Review
 
 on:
-  pull_request:
+  pull_request_target:
     types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+concurrency:
+  group: ai-review-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+=======
 
 permissions:
   contents: read
   pull-requests: write
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   ai-review:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout AiAdvent1 (PR head)
-        uses: actions/checkout@v4
+      - name: Diagnostics
+        run: |
+          echo "event=${{ github.event_name }}"
+          echo "repository=${{ github.repository }}"
 
-      - name: Checkout llm_agent (review engine)
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ vars.LLM_AGENT_REPOSITORY || 'Sergey1057/llm_agent' }}
-          path: llm_agent
-          ref: ${{ vars.LLM_AGENT_REF || 'main' }}
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "head_repo=${{ github.event.pull_request.head.repo.full_name }}"
+            echo "base_repo=${{ github.event.pull_request.base.repo.full_name }}"
+            if [ "${{ github.event.pull_request.head.repo.full_name }}" != "${{ github.repository }}" ]; then
+              echo "::warning::PR из fork — secrets репозитория недоступны. Пушьте ветку в ${{ github.repository }}."
+            fi
+          fi
+
+      - name: Configure GIGACHAT_API_KEY
+        env:
+          KEY: ${{ secrets.GIGACHAT_API_KEY }}
+          ALT1: ${{ secrets.GIGACHAT_AUTH_KEY }}
+          ALT2: ${{ secrets.GIGACHAT_CREDENTIALS }}
+        run: |
+          set -e
+          VAL=""
+          if [ -n "$KEY" ]; then VAL="$KEY"; fi
+          if [ -z "$VAL" ] && [ -n "$ALT1" ]; then VAL="$ALT1"; fi
+          if [ -z "$VAL" ] && [ -n "$ALT2" ]; then VAL="$ALT2"; fi
+          if [ -z "$VAL" ]; then
+            echo "::error::Не найден secret GIGACHAT_API_KEY (вкладка Secrets, не Variables)."
+            echo "::error::Создайте: https://github.com/${{ github.repository }}/settings/secrets/actions"
+            echo "::error::Или CLI: gh secret set GIGACHAT_API_KEY --repo ${{ github.repository }}"
+            if [ "${{ github.event_name }}" = "pull_request" ] && \
+               [ "${{ github.event.pull_request.head.repo.full_name }}" != "${{ github.repository }}" ]; then
+              echo "::error::PR из fork — GitHub не передаёт secrets. Создайте ветку в основном репозитории."
+            fi
+            exit 1
+          fi
+          echo "GIGACHAT_API_KEY=$VAL" >> "$GITHUB_ENV"
+          echo "GigaChat key OK (длина=${#VAL} символов)"
+
+      - name: Checkout PR
+        uses: actions/checkout@v6
+
+      - name: Verify review bundle
+        run: |
+          test -f .github/ai-review/review_pr.py || {
+            echo "::error::Нет .github/ai-review/review_pr.py"
+            exit 1
+          }
+          ls -la .github/ai-review/
+
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-          cache: pip
-          cache-dependency-path: llm_agent/requirements.txt
 
       - name: Install dependencies
-        working-directory: llm_agent
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
 
-      - name: Build RAG index from docs
-        working-directory: llm_agent
-        env:
-          LLM_AGENT_PROJECT_ROOT: ${{ github.workspace }}
-        run: |
-          python -m dev_assistant --build-index --dummy-embeddings --project-root "$LLM_AGENT_PROJECT_ROOT"
+        run: python -m pip install -r .github/ai-review/requirements.txt
 
-      - name: AI code review
-        working-directory: llm_agent
+
+      - name: Run AI code review
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          LLM_AGENT_PROJECT_ROOT: ${{ github.workspace }}
-          LLM_AGENT_PROJECT_RAG_INDEX: memory/index_out/project_docs_index.json
-          LLM_AGENT_RAG_LOCAL: "1"
-          LLM_AGENT_BACKEND: ${{ secrets.GROQ_API_KEY != '' && 'local' || 'cloud' }}
-          LLM_AGENT_LOCAL_BASE_URL: https://api.groq.com/openai/v1
-          LLM_AGENT_LOCAL_MODEL: ${{ vars.PR_REVIEW_MODEL || 'llama-3.3-70b-versatile' }}
-          LLM_AGENT_LOCAL_API_KEY: ${{ secrets.GROQ_API_KEY }}
-          GIGACHAT_API_KEY: ${{ secrets.GIGACHAT_API_KEY }}
-        run: python pr_code_review.py
+
+          GIGACHAT_MODEL: ${{ vars.PR_REVIEW_MODEL || vars.GIGACHAT_MODEL || 'GigaChat' }}
+          GIGACHAT_SCOPE: ${{ vars.GIGACHAT_SCOPE || 'GIGACHAT_API_PERS' }}
+          PR_REVIEW_LLM: gigachat
+          PR_PROJECT_ROOT: ${{ github.workspace }}
+
+
+        run: python .github/ai-review/review_pr.py

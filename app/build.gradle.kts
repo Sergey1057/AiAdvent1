@@ -25,6 +25,7 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         buildConfigField("String", "GROQ_API_KEY", "\"${localProps.getProperty("GROQ_API_KEY", "")}\"")
+        buildConfigField("String", "GIGACHAT_API_KEY", "\"${localProps.getProperty("GIGACHAT_API_KEY", "")}\"")
     }
 
     buildTypes {
