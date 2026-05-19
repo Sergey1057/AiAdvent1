@@ -75,6 +75,7 @@ import java.util.UUID
 import org.json.JSONArray
 import org.json.JSONObject
 import ru.sergei1057.aiadvent1.ui.theme.AiAdvent1Theme
+import ru.sergei1057.aiadvent1.ui.theme.ChatBackground
 import ru.sergei1057.aiadvent1.ui.theme.SettingsBackground
 
 private const val PREFS_NAME = "ai_advent_prefs"
@@ -466,9 +467,13 @@ fun GroqChatScreen(
     }
 
     Scaffold(
+        containerColor = ChatBackground,
         topBar = {
             TopAppBar(
                 title = { Text("AI Chat") },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = ChatBackground
+                ),
                 actions = {
                     TextButton(onClick = onOpenSettings) {
                         Text("Настройки")
@@ -481,7 +486,7 @@ fun GroqChatScreen(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.surface)
+                    .background(ChatBackground)
                     .navigationBarsPadding()
                     .imePadding()
                     .padding(horizontal = 16.dp, vertical = 12.dp),
@@ -561,6 +566,7 @@ fun GroqChatScreen(
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
+                .background(ChatBackground)
                 .padding(innerPadding),
             state = listState,
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),

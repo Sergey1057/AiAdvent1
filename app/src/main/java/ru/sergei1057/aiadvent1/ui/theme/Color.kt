@@ -12,3 +12,6 @@ val Pink40 = Color(0xFF7D5260)
 
 /** Салатовый фон экрана «Настройки». */
 val SettingsBackground = Color(0xFFE8F5C8)
+
+/** Бежевый фон основного экрана чата. */
+val ChatBackground = Color(0xFFF5E6D3)
