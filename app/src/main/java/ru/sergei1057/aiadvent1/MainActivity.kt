@@ -47,6 +47,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -74,6 +75,7 @@ import java.util.UUID
 import org.json.JSONArray
 import org.json.JSONObject
 import ru.sergei1057.aiadvent1.ui.theme.AiAdvent1Theme
+import ru.sergei1057.aiadvent1.ui.theme.SettingsBackground
 
 private const val PREFS_NAME = "ai_advent_prefs"
 private const val KEY_SYSTEM_PROMPT = "system_prompt"
@@ -221,9 +223,13 @@ fun SettingsScreen(
     var modelDropdownExpanded by remember { mutableStateOf(false) }
 
     Scaffold(
+        containerColor = SettingsBackground,
         topBar = {
             TopAppBar(
                 title = { Text("Настройки") },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = SettingsBackground
+                ),
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(
@@ -238,6 +244,7 @@ fun SettingsScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .background(SettingsBackground)
                 .padding(innerPadding)
                 .imePadding()
                 .padding(horizontal = 16.dp, vertical = 12.dp)
