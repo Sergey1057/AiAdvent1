@@ -517,8 +517,13 @@ def main() -> int:
 
     root = args.project_root
     if root is None:
-        ws = (os.environ.get("GITHUB_WORKSPACE") or "").strip()
-        root = Path(ws) if ws else Path.cwd()
+        for key in ("PR_PROJECT_ROOT", "LLM_AGENT_PROJECT_ROOT", "GITHUB_WORKSPACE"):
+            raw = (os.environ.get(key) or "").strip()
+            if raw:
+                root = Path(raw)
+                break
+        else:
+            root = Path.cwd()
 
     if not _PROMPT_FILE.is_file():
         print(f"Не найден {_PROMPT_FILE} — закоммитьте .github/ai-review/ в репозиторий.", file=sys.stderr)

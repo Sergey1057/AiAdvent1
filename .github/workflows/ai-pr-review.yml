@@ -1,10 +1,11 @@
-# Self-contained AI PR review — .github/ai-review/
-# Secret: GIGACHAT_API_KEY (Settings → Secrets → Actions)
+# AI PR review (GigaChat). Secret: GIGACHAT_API_KEY в Settings → Secrets → Actions.
+#
+# pull_request_target — secrets доступны и для PR из fork (скрипт только с base-ветки).
 
 name: AI PR Review
 
 on:
-  pull_request:
+  pull_request_target:
     types: [opened, synchronize, reopened]
   workflow_dispatch:
 
@@ -19,27 +20,61 @@ jobs:
   ai-review:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout PR
+      - name: Diagnostics
+        run: |
+          echo "event=${{ github.event_name }}"
+          echo "repository=${{ github.repository }}"
+          if [ "${{ github.event_name }}" = "pull_request_target" ]; then
+            echo "head_repo=${{ github.event.pull_request.head.repo.full_name }}"
+            echo "base_ref=${{ github.event.pull_request.base.ref }}"
+            echo "pr_number=${{ github.event.pull_request.number }}"
+          fi
+          if [ -n "${{ secrets.GIGACHAT_API_KEY }}" ]; then
+            echo "GIGACHAT_API_KEY: доступен в контексте workflow (значение скрыто)"
+          else
+            echo "::warning::GIGACHAT_API_KEY пуст в secrets — проверьте имя secret и репозиторий"
+          fi
+
+      - name: Checkout base branch (trusted review scripts)
+        if: github.event_name == 'pull_request_target'
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: review-root
+
+      - name: Checkout PR code for analysis
+        if: github.event_name == 'pull_request_target'
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: pr-src
+
+      - name: Checkout (manual run)
+        if: github.event_name == 'workflow_dispatch'
         uses: actions/checkout@v6
 
-      - name: Verify review bundle
+      - name: Resolve paths to review bundle
+        id: paths
         run: |
-          test -f .github/ai-review/review_pr.py || {
-            echo "::error::Нет .github/ai-review/review_pr.py — добавьте папку ai-review в репозиторий"
+          set -e
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            ROOT="${{ github.workspace }}"
+            PROJECT="${{ github.workspace }}"
+          else
+            ROOT="${{ github.workspace }}/review-root"
+            PROJECT="${{ github.workspace }}/pr-src"
+            if [ ! -f "$ROOT/.github/ai-review/review_pr.py" ] && [ -f "$PROJECT/.github/ai-review/review_pr.py" ]; then
+              echo "::warning::Скрипт ревью только в PR-ветке — используем pr-src (смержите .github/ai-review в main)"
+              ROOT="$PROJECT"
+            fi
+          fi
+          test -f "$ROOT/.github/ai-review/review_pr.py" || {
+            echo "::error::Нет .github/ai-review/review_pr.py в base-ветке. Сначала смержите workflow в main."
             exit 1
           }
-          test -f .github/ai-review/prompt.txt
-          ls -la .github/ai-review/
-
-      - name: Check GIGACHAT_API_KEY secret
-        env:
-          GIGA_KEY: ${{ secrets.GIGACHAT_API_KEY }}
-        run: |
-          if [ -z "$GIGA_KEY" ]; then
-            echo "::error::Secret GIGACHAT_API_KEY не задан. Repository → Settings → Secrets and variables → Actions"
-            exit 1
-          fi
-          echo "GIGACHAT_API_KEY: задан (${#GIGA_KEY} символов)"
+          echo "review_root=$ROOT" >> "$GITHUB_OUTPUT"
+          echo "project_root=$PROJECT" >> "$GITHUB_OUTPUT"
+          ls -la "$ROOT/.github/ai-review/"
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -47,7 +82,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: python -m pip install -r .github/ai-review/requirements.txt
+        run: python -m pip install -r "${{ steps.paths.outputs.review_root }}/.github/ai-review/requirements.txt"
 
       - name: Run AI code review
         env:
@@ -56,4 +91,6 @@ jobs:
           GIGACHAT_MODEL: ${{ vars.PR_REVIEW_MODEL || vars.GIGACHAT_MODEL || 'GigaChat' }}
           GIGACHAT_SCOPE: ${{ vars.GIGACHAT_SCOPE || 'GIGACHAT_API_PERS' }}
           PR_REVIEW_LLM: gigachat
+          PR_PROJECT_ROOT: ${{ steps.paths.outputs.project_root }}
+        working-directory: ${{ steps.paths.outputs.review_root }}
         run: python .github/ai-review/review_pr.py
