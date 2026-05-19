@@ -1,19 +1,16 @@
-
-# AI PR review (GigaChat)
-# Repository secret: GIGACHAT_API_KEY → Settings → Secrets and variables → Actions → Secrets
-=======
+# AI PR review: GigaChat или Groq (см. README в deploy/ai-advent1).
+# Secrets (один из): GIGACHAT_API_KEY | GROQ_API_KEY
 
 name: AI PR Review
 
 on:
-  pull_request_target:
+  pull_request:
     types: [opened, synchronize, reopened]
   workflow_dispatch:
 
 concurrency:
   group: ai-review-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
-=======
 
 permissions:
   contents: read
@@ -30,7 +27,6 @@ jobs:
         run: |
           echo "event=${{ github.event_name }}"
           echo "repository=${{ github.repository }}"
-
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             echo "head_repo=${{ github.event.pull_request.head.repo.full_name }}"
             echo "base_repo=${{ github.event.pull_request.base.repo.full_name }}"
@@ -39,29 +35,39 @@ jobs:
             fi
           fi
 
-      - name: Configure GIGACHAT_API_KEY
+      - name: Configure LLM API key
         env:
-          KEY: ${{ secrets.GIGACHAT_API_KEY }}
-          ALT1: ${{ secrets.GIGACHAT_AUTH_KEY }}
-          ALT2: ${{ secrets.GIGACHAT_CREDENTIALS }}
+          GIGACHAT_KEY: ${{ secrets.GIGACHAT_API_KEY }}
+          GIGACHAT_ALT1: ${{ secrets.GIGACHAT_AUTH_KEY }}
+          GIGACHAT_ALT2: ${{ secrets.GIGACHAT_CREDENTIALS }}
+          GROQ_KEY: ${{ secrets.GROQ_API_KEY }}
         run: |
           set -e
-          VAL=""
-          if [ -n "$KEY" ]; then VAL="$KEY"; fi
-          if [ -z "$VAL" ] && [ -n "$ALT1" ]; then VAL="$ALT1"; fi
-          if [ -z "$VAL" ] && [ -n "$ALT2" ]; then VAL="$ALT2"; fi
-          if [ -z "$VAL" ]; then
-            echo "::error::Не найден secret GIGACHAT_API_KEY (вкладка Secrets, не Variables)."
-            echo "::error::Создайте: https://github.com/${{ github.repository }}/settings/secrets/actions"
-            echo "::error::Или CLI: gh secret set GIGACHAT_API_KEY --repo ${{ github.repository }}"
+          GIGA=""
+          if [ -n "$GIGACHAT_KEY" ]; then GIGA="$GIGACHAT_KEY"; fi
+          if [ -z "$GIGA" ] && [ -n "$GIGACHAT_ALT1" ]; then GIGA="$GIGACHAT_ALT1"; fi
+          if [ -z "$GIGA" ] && [ -n "$GIGACHAT_ALT2" ]; then GIGA="$GIGACHAT_ALT2"; fi
+
+          if [ -n "$GIGA" ]; then
+            echo "GIGACHAT_API_KEY=$GIGA" >> "$GITHUB_ENV"
+            echo "PR_REVIEW_LLM=gigachat" >> "$GITHUB_ENV"
+            echo "LLM: GigaChat (длина ключа=${#GIGA} символов)"
+          elif [ -n "$GROQ_KEY" ]; then
+            echo "GROQ_API_KEY=$GROQ_KEY" >> "$GITHUB_ENV"
+            echo "PR_REVIEW_LLM=groq" >> "$GITHUB_ENV"
+            echo "LLM: Groq (длина ключа=${#GROQ_KEY} символов)"
+          else
+            echo "::error::Не задан LLM-ключ. Добавьте secret в Settings → Secrets and variables → Actions → Secrets:"
+            echo "::error::  • GIGACHAT_API_KEY — ключ из https://developers.sber.ru/docs/ru/gigachat/quickstart/ind-using-api"
+            echo "::error::  • или GROQ_API_KEY — ключ из https://console.groq.com/keys"
+            echo "::error::Репозиторий: https://github.com/${{ github.repository }}/settings/secrets/actions"
+            echo "::error::CLI: gh secret set GIGACHAT_API_KEY --repo ${{ github.repository }}"
             if [ "${{ github.event_name }}" = "pull_request" ] && \
                [ "${{ github.event.pull_request.head.repo.full_name }}" != "${{ github.repository }}" ]; then
               echo "::error::PR из fork — GitHub не передаёт secrets. Создайте ветку в основном репозитории."
             fi
             exit 1
           fi
-          echo "GIGACHAT_API_KEY=$VAL" >> "$GITHUB_ENV"
-          echo "GigaChat key OK (длина=${#VAL} символов)"
 
       - name: Checkout PR
         uses: actions/checkout@v6
@@ -74,25 +80,19 @@ jobs:
           }
           ls -la .github/ai-review/
 
-
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
       - name: Install dependencies
-
         run: python -m pip install -r .github/ai-review/requirements.txt
-
 
       - name: Run AI code review
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
           GIGACHAT_MODEL: ${{ vars.PR_REVIEW_MODEL || vars.GIGACHAT_MODEL || 'GigaChat' }}
           GIGACHAT_SCOPE: ${{ vars.GIGACHAT_SCOPE || 'GIGACHAT_API_PERS' }}
-          PR_REVIEW_LLM: gigachat
+          PR_REVIEW_MODEL: ${{ vars.PR_REVIEW_MODEL || 'llama-3.3-70b-versatile' }}
           PR_PROJECT_ROOT: ${{ github.workspace }}
-
-
         run: python .github/ai-review/review_pr.py
