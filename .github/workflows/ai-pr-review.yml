@@ -1,65 +1,96 @@
-# Скопируйте в AiAdvent1: .github/workflows/ai-pr-review.yml
+# AI PR review (GigaChat). Secret: GIGACHAT_API_KEY в Settings → Secrets → Actions.
 #
-# Требования:
-# 1. Репозиторий llm_agent на GitHub (переменная LLM_AGENT_REPOSITORY или по умолчанию Sergey1057/llm_agent)
-# 2. Secret GROQ_API_KEY (или GIGACHAT_API_KEY + LLM_AGENT_BACKEND=cloud в шаге run)
-#
-# Документация проекта: docs/ + REDME.md — индексируются в CI для RAG.
+# pull_request_target — secrets доступны и для PR из fork (скрипт только с base-ветки).
 
 name: AI PR Review
 
 on:
-  pull_request:
+  pull_request_target:
     types: [opened, synchronize, reopened]
+  workflow_dispatch:
 
 permissions:
   contents: read
   pull-requests: write
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   ai-review:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout AiAdvent1 (PR head)
-        uses: actions/checkout@v4
+      - name: Diagnostics
+        run: |
+          echo "event=${{ github.event_name }}"
+          echo "repository=${{ github.repository }}"
+          if [ "${{ github.event_name }}" = "pull_request_target" ]; then
+            echo "head_repo=${{ github.event.pull_request.head.repo.full_name }}"
+            echo "base_ref=${{ github.event.pull_request.base.ref }}"
+            echo "pr_number=${{ github.event.pull_request.number }}"
+          fi
+          if [ -n "${{ secrets.GIGACHAT_API_KEY }}" ]; then
+            echo "GIGACHAT_API_KEY: доступен в контексте workflow (значение скрыто)"
+          else
+            echo "::warning::GIGACHAT_API_KEY пуст в secrets — проверьте имя secret и репозиторий"
+          fi
 
-      - name: Checkout llm_agent (review engine)
-        uses: actions/checkout@v4
+      - name: Checkout base branch (trusted review scripts)
+        if: github.event_name == 'pull_request_target'
+        uses: actions/checkout@v6
         with:
-          repository: ${{ vars.LLM_AGENT_REPOSITORY || 'Sergey1057/llm_agent' }}
-          path: llm_agent
-          ref: ${{ vars.LLM_AGENT_REF || 'main' }}
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: review-root
+
+      - name: Checkout PR code for analysis
+        if: github.event_name == 'pull_request_target'
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: pr-src
+
+      - name: Checkout (manual run)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/checkout@v6
+
+      - name: Resolve paths to review bundle
+        id: paths
+        run: |
+          set -e
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            ROOT="${{ github.workspace }}"
+            PROJECT="${{ github.workspace }}"
+          else
+            ROOT="${{ github.workspace }}/review-root"
+            PROJECT="${{ github.workspace }}/pr-src"
+            if [ ! -f "$ROOT/.github/ai-review/review_pr.py" ] && [ -f "$PROJECT/.github/ai-review/review_pr.py" ]; then
+              echo "::warning::Скрипт ревью только в PR-ветке — используем pr-src (смержите .github/ai-review в main)"
+              ROOT="$PROJECT"
+            fi
+          fi
+          test -f "$ROOT/.github/ai-review/review_pr.py" || {
+            echo "::error::Нет .github/ai-review/review_pr.py в base-ветке. Сначала смержите workflow в main."
+            exit 1
+          }
+          echo "review_root=$ROOT" >> "$GITHUB_OUTPUT"
+          echo "project_root=$PROJECT" >> "$GITHUB_OUTPUT"
+          ls -la "$ROOT/.github/ai-review/"
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-          cache: pip
-          cache-dependency-path: llm_agent/requirements.txt
 
       - name: Install dependencies
-        working-directory: llm_agent
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+        run: python -m pip install -r "${{ steps.paths.outputs.review_root }}/.github/ai-review/requirements.txt"
 
-      - name: Build RAG index from docs
-        working-directory: llm_agent
-        env:
-          LLM_AGENT_PROJECT_ROOT: ${{ github.workspace }}
-        run: |
-          python -m dev_assistant --build-index --dummy-embeddings --project-root "$LLM_AGENT_PROJECT_ROOT"
-
-      - name: AI code review
-        working-directory: llm_agent
+      - name: Run AI code review
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          LLM_AGENT_PROJECT_ROOT: ${{ github.workspace }}
-          LLM_AGENT_PROJECT_RAG_INDEX: memory/index_out/project_docs_index.json
-          LLM_AGENT_RAG_LOCAL: "1"
-          LLM_AGENT_BACKEND: ${{ secrets.GROQ_API_KEY != '' && 'local' || 'cloud' }}
-          LLM_AGENT_LOCAL_BASE_URL: https://api.groq.com/openai/v1
-          LLM_AGENT_LOCAL_MODEL: ${{ vars.PR_REVIEW_MODEL || 'llama-3.3-70b-versatile' }}
-          LLM_AGENT_LOCAL_API_KEY: ${{ secrets.GROQ_API_KEY }}
           GIGACHAT_API_KEY: ${{ secrets.GIGACHAT_API_KEY }}
-        run: python pr_code_review.py
+          GIGACHAT_MODEL: ${{ vars.PR_REVIEW_MODEL || vars.GIGACHAT_MODEL || 'GigaChat' }}
+          GIGACHAT_SCOPE: ${{ vars.GIGACHAT_SCOPE || 'GIGACHAT_API_PERS' }}
+          PR_REVIEW_LLM: gigachat
+          PR_PROJECT_ROOT: ${{ steps.paths.outputs.project_root }}
+        working-directory: ${{ steps.paths.outputs.review_root }}
+        run: python .github/ai-review/review_pr.py
