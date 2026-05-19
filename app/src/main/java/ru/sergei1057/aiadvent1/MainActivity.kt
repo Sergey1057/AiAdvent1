@@ -427,7 +427,7 @@ private data class GroqResult(
     val totalTokens: Int? = null
 )
 
-private data class ChatTurn(
+data class ChatTurn(
     val id: Long,
     val query: String,
     val answer: String,
@@ -446,13 +446,16 @@ fun GroqChatScreen(
     temperatureEnabled: Boolean,
     temperature: Float,
     selectedModelId: String,
-    onOpenSettings: () -> Unit
+    onOpenSettings: () -> Unit,
+    initialTurns: List<ChatTurn> = emptyList()
 ) {
     val context = LocalContext.current
     val keyboardController = LocalSoftwareKeyboardController.current
     val scope = rememberCoroutineScope()
     var prompt by remember { mutableStateOf("") }
-    val turns = remember { mutableStateListOf<ChatTurn>() }
+    val turns = remember {
+        mutableStateListOf<ChatTurn>().also { it.addAll(initialTurns) }
+    }
     val listState = rememberLazyListState()
     val isAwaitingAnswer = turns.any { it.loading }
 

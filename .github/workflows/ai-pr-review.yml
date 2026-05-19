@@ -1,5 +1,7 @@
+
 # AI PR review: GigaChat или Groq (см. README в deploy/ai-advent1).
 # Secrets (один из): GIGACHAT_API_KEY | GROQ_API_KEY
+
 
 name: AI PR Review
 
