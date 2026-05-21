@@ -1,6 +1,6 @@
-# После push в main (изменения в app/) — File Assistant обновляет REDME.md и docs/.
-# Секреты: GROQ_API_KEY или GIGACHAT_API_KEY (как у ai-pr-review).
-# Коммиты бота содержат [skip docs] — повторный запуск не срабатывает.
+# После push в main (app/**) — обновление REDME.md и docs/ (self-contained, без llm_agent на GitHub).
+# Секреты: GROQ_API_KEY или GIGACHAT_API_KEY (как ai-pr-review).
+# Нужны: .github/file-assistant/ и .github/ai-review/gigachat_client.py
 
 name: AI Docs Sync
 
@@ -40,12 +40,16 @@ jobs:
           fetch-depth: 2
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Checkout llm_agent
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ vars.LLM_AGENT_REPOSITORY || 'Sergey1057/llm_agent' }}
-          path: llm_agent
-          ref: ${{ vars.LLM_AGENT_REF || 'main' }}
+      - name: Verify docs-sync bundle
+        run: |
+          test -f .github/file-assistant/sync_docs.py || {
+            echo "::error::Скопируйте deploy/ai-advent1/file-assistant/ в .github/file-assistant/"
+            exit 1
+          }
+          test -f .github/ai-review/gigachat_client.py || {
+            echo "::error::Нужен .github/ai-review/gigachat_client.py (из deploy/ai-advent1/ai-review/)"
+            exit 1
+          }
 
       - name: Configure LLM API key
         env:
@@ -62,17 +66,14 @@ jobs:
 
           if [ -n "$GIGA" ]; then
             echo "GIGACHAT_API_KEY=$GIGA" >> "$GITHUB_ENV"
-            echo "LLM_AGENT_BACKEND=cloud" >> "$GITHUB_ENV"
+            echo "DOCS_SYNC_LLM=gigachat" >> "$GITHUB_ENV"
             echo "LLM: GigaChat"
           elif [ -n "$GROQ_KEY" ]; then
             echo "GROQ_API_KEY=$GROQ_KEY" >> "$GITHUB_ENV"
-            echo "LLM_AGENT_BACKEND=local" >> "$GITHUB_ENV"
-            echo "LLM_AGENT_LOCAL_BASE_URL=https://api.groq.com/openai/v1" >> "$GITHUB_ENV"
-            echo "LLM_AGENT_LOCAL_MODEL=${{ vars.DOCS_SYNC_MODEL || vars.PR_REVIEW_MODEL || 'llama-3.3-70b-versatile' }}" >> "$GITHUB_ENV"
-            echo "LLM_AGENT_LOCAL_API_KEY=$GROQ_KEY" >> "$GITHUB_ENV"
+            echo "DOCS_SYNC_LLM=groq" >> "$GITHUB_ENV"
             echo "LLM: Groq"
           else
-            echo "::error::Нужен GIGACHAT_API_KEY или GROQ_API_KEY"
+            echo "::error::Добавьте GIGACHAT_API_KEY или GROQ_API_KEY в Secrets"
             exit 1
           fi
 
@@ -84,19 +85,18 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install llm_agent dependencies
-        working-directory: llm_agent
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+      - name: Install dependencies
+        run: python -m pip install -r .github/file-assistant/requirements.txt
 
-      - name: Run File Assistant (apply)
-        working-directory: llm_agent
+      - name: Run docs sync
         env:
-          LLM_AGENT_FILE_ROOT: ${{ github.workspace }}
-          GITHUB_WORKSPACE: ${{ github.workspace }}
+          DOCS_SYNC_PROJECT_ROOT: ${{ github.workspace }}
           DOCS_SYNC_COMMIT_MSG: ${{ github.event.head_commit.message }}
-        run: python scripts/sync_docs_ci.py
+          DOCS_SYNC_FORCE: ${{ github.event_name == 'workflow_dispatch' && '1' || '' }}
+          GIGACHAT_MODEL: ${{ vars.GIGACHAT_MODEL || 'GigaChat' }}
+          GIGACHAT_SCOPE: ${{ vars.GIGACHAT_SCOPE || 'GIGACHAT_API_PERS' }}
+          DOCS_SYNC_MODEL: ${{ vars.DOCS_SYNC_MODEL || vars.PR_REVIEW_MODEL || 'llama-3.3-70b-versatile' }}
+        run: python .github/file-assistant/sync_docs.py
 
       - name: Commit and push doc updates
         run: |
