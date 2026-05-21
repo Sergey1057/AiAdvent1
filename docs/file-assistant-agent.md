@@ -30,9 +30,20 @@ python3 cli.py --file-assistant --file-goal \
 
 Подробности: `llm_agent/deploy/file-assistant/README.md`.
 
+## Автоматизация (после мержа в main)
+
+Workflow **AI Docs Sync** (`.github/workflows/ai-docs-sync.yml`):
+
+1. Push в `main` с изменениями в `app/**`
+2. GitHub Actions вызывает [llm_agent](https://github.com/Sergey1057/llm_agent) File Assistant
+3. Обновляются `REDME.md` и `docs/`, коммит `docs: AI sync после мержа [skip docs]`
+
+Нужны те же секреты `GROQ_API_KEY` / `GIGACHAT_API_KEY`, что и для PR review.
+
 ## Связь с AI PR Review
 
 | Инструмент | Когда |
 |------------|--------|
 | `.github/workflows/ai-pr-review.yml` | На каждый PR — review кода |
-| File Assistant | После мержа — актуализировать `docs/` |
+| `.github/workflows/ai-docs-sync.yml` | После мержа в `main` — авто-обновление `REDME.md` и `docs/` |
+| File Assistant (локально) | Ручной запуск / отладка |

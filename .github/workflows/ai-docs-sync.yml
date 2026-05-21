@@ -1,0 +1,111 @@
+# После push в main (изменения в app/) — File Assistant обновляет REDME.md и docs/.
+# Секреты: GROQ_API_KEY или GIGACHAT_API_KEY (как у ai-pr-review).
+# Коммиты бота содержат [skip docs] — повторный запуск не срабатывает.
+
+name: AI Docs Sync
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "app/**"
+      - "gradle/**"
+      - "*.gradle.kts"
+  workflow_dispatch:
+
+concurrency:
+  group: ai-docs-sync-${{ github.repository }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  sync-docs:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (
+        github.event_name == 'push' &&
+        !contains(github.event.head_commit.message, '[skip docs]') &&
+        !contains(github.event.head_commit.message, 'docs: AI sync')
+      )
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Checkout llm_agent
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.LLM_AGENT_REPOSITORY || 'Sergey1057/llm_agent' }}
+          path: llm_agent
+          ref: ${{ vars.LLM_AGENT_REF || 'main' }}
+
+      - name: Configure LLM API key
+        env:
+          GIGACHAT_KEY: ${{ secrets.GIGACHAT_API_KEY }}
+          GIGACHAT_ALT1: ${{ secrets.GIGACHAT_AUTH_KEY }}
+          GIGACHAT_ALT2: ${{ secrets.GIGACHAT_CREDENTIALS }}
+          GROQ_KEY: ${{ secrets.GROQ_API_KEY }}
+        run: |
+          set -e
+          GIGA=""
+          if [ -n "$GIGACHAT_KEY" ]; then GIGA="$GIGACHAT_KEY"; fi
+          if [ -z "$GIGA" ] && [ -n "$GIGACHAT_ALT1" ]; then GIGA="$GIGACHAT_ALT1"; fi
+          if [ -z "$GIGA" ] && [ -n "$GIGACHAT_ALT2" ]; then GIGA="$GIGACHAT_ALT2"; fi
+
+          if [ -n "$GIGA" ]; then
+            echo "GIGACHAT_API_KEY=$GIGA" >> "$GITHUB_ENV"
+            echo "LLM_AGENT_BACKEND=cloud" >> "$GITHUB_ENV"
+            echo "LLM: GigaChat"
+          elif [ -n "$GROQ_KEY" ]; then
+            echo "GROQ_API_KEY=$GROQ_KEY" >> "$GITHUB_ENV"
+            echo "LLM_AGENT_BACKEND=local" >> "$GITHUB_ENV"
+            echo "LLM_AGENT_LOCAL_BASE_URL=https://api.groq.com/openai/v1" >> "$GITHUB_ENV"
+            echo "LLM_AGENT_LOCAL_MODEL=${{ vars.DOCS_SYNC_MODEL || vars.PR_REVIEW_MODEL || 'llama-3.3-70b-versatile' }}" >> "$GITHUB_ENV"
+            echo "LLM_AGENT_LOCAL_API_KEY=$GROQ_KEY" >> "$GITHUB_ENV"
+            echo "LLM: Groq"
+          else
+            echo "::error::Нужен GIGACHAT_API_KEY или GROQ_API_KEY"
+            exit 1
+          fi
+
+      - name: Install ripgrep
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ripgrep
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install llm_agent dependencies
+        working-directory: llm_agent
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run File Assistant (apply)
+        working-directory: llm_agent
+        env:
+          LLM_AGENT_FILE_ROOT: ${{ github.workspace }}
+          GITHUB_WORKSPACE: ${{ github.workspace }}
+          DOCS_SYNC_COMMIT_MSG: ${{ github.event.head_commit.message }}
+        run: python scripts/sync_docs_ci.py
+
+      - name: Commit and push doc updates
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add REDME.md docs/ || true
+          if git diff --staged --quiet; then
+            echo "Нет изменений в REDME.md / docs/"
+            exit 0
+          fi
+          git commit -m "docs: AI sync после мержа [skip docs]"
+          git push
