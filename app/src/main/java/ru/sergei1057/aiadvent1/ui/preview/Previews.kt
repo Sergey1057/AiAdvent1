@@ -3,7 +3,7 @@ package ru.sergei1057.aiadvent1.ui.preview
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.tooling.preview.Preview
 import ru.sergei1057.aiadvent1.ChatTurn
-import ru.sergei1057.aiadvent1.GroqChatScreen
+import ru.sergei1057.aiadvent1.ChatScreen
 import ru.sergei1057.aiadvent1.SettingsScreen
 import ru.sergei1057.aiadvent1.ui.theme.AiAdvent1Theme
 
@@ -45,9 +45,9 @@ private fun SettingsScreenGigaChatPreview() {
 
 @Preview(name = "Чат — пустой", showBackground = true, showSystemUi = true)
 @Composable
-private fun GroqChatScreenEmptyPreview() {
+private fun ChatScreenEmptyPreview() {
     AiAdvent1Theme(dynamicColor = false) {
-        GroqChatScreen(
+        ChatScreen(
             maxAnswerTokens = 1024,
             answerJsonFormat = false,
             systemPrompt = "",
@@ -62,9 +62,9 @@ private fun GroqChatScreenEmptyPreview() {
 
 @Preview(name = "Чат — с историей", showBackground = true, showSystemUi = true)
 @Composable
-private fun GroqChatScreenWithHistoryPreview() {
+private fun ChatScreenWithHistoryPreview() {
     AiAdvent1Theme(dynamicColor = false) {
-        GroqChatScreen(
+        ChatScreen(
             maxAnswerTokens = 1024,
             answerJsonFormat = false,
             systemPrompt = "",
@@ -97,9 +97,9 @@ private fun GroqChatScreenWithHistoryPreview() {
 
 @Preview(name = "Чат — загрузка", showBackground = true)
 @Composable
-private fun GroqChatScreenLoadingPreview() {
+private fun ChatScreenLoadingPreview() {
     AiAdvent1Theme(dynamicColor = false) {
-        GroqChatScreen(
+        ChatScreen(
             maxAnswerTokens = 1024,
             answerJsonFormat = false,
             systemPrompt = "",
