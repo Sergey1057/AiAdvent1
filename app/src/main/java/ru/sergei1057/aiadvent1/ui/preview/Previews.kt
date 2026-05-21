@@ -3,7 +3,7 @@ package ru.sergei1057.aiadvent1.ui.preview
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.tooling.preview.Preview
 import ru.sergei1057.aiadvent1.ChatTurn
-import ru.sergei1057.aiadvent1.GigaChatScreen
+import ru.sergei1057.aiadvent1.GroqChatScreen
 import ru.sergei1057.aiadvent1.SettingsScreen
 import ru.sergei1057.aiadvent1.ui.theme.AiAdvent1Theme
 
@@ -18,7 +18,7 @@ private fun SettingsScreenPreview() {
             initialApplySystemPrompt = true,
             initialTemperatureEnabled = false,
             initialTemperature = 1.0f,
-            initialModelId = "llama-3.3-70b-versatile",
+            initialModelId = "GigaChat",
             onBack = {},
             onApply = { _, _, _, _, _, _, _ -> }
         )
@@ -45,16 +45,16 @@ private fun SettingsScreenGigaChatPreview() {
 
 @Preview(name = "Чат — пустой", showBackground = true, showSystemUi = true)
 @Composable
-private fun GigaChatScreenEmptyPreview() {
+private fun GroqChatScreenEmptyPreview() {
     AiAdvent1Theme(dynamicColor = false) {
-        GigaChatScreen(
+        GroqChatScreen(
             maxAnswerTokens = 1024,
             answerJsonFormat = false,
             systemPrompt = "",
             applySystemPrompt = true,
             temperatureEnabled = false,
             temperature = 1.0f,
-            selectedModelId = "llama-3.3-70b-versatile",
+            selectedModelId = "GigaChat",
             onOpenSettings = {}
         )
     }
@@ -62,9 +62,9 @@ private fun GigaChatScreenEmptyPreview() {
 
 @Preview(name = "Чат — с историей", showBackground = true, showSystemUi = true)
 @Composable
-private fun GigaChatScreenWithHistoryPreview() {
+private fun GroqChatScreenWithHistoryPreview() {
     AiAdvent1Theme(dynamicColor = false) {
-        GigaChatScreen(
+        GroqChatScreen(
             maxAnswerTokens = 1024,
             answerJsonFormat = false,
             systemPrompt = "",
@@ -97,9 +97,9 @@ private fun GigaChatScreenWithHistoryPreview() {
 
 @Preview(name = "Чат — загрузка", showBackground = true)
 @Composable
-private fun GigaChatScreenLoadingPreview() {
+private fun GroqChatScreenLoadingPreview() {
     AiAdvent1Theme(dynamicColor = false) {
-        GigaChatScreen(
+        GroqChatScreen(
             maxAnswerTokens = 1024,
             answerJsonFormat = false,
             systemPrompt = "",

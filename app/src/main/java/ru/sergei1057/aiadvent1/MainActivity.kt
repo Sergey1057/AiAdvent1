@@ -85,29 +85,21 @@ private const val KEY_TEMPERATURE_ENABLED = "temperature_enabled"
 private const val KEY_TEMPERATURE = "temperature"
 private const val KEY_MODEL = "selected_model"
 
-private enum class LlmProvider { Groq, GigaChat }
-
 private data class ChatModel(
-    val provider: LlmProvider,
     val displayName: String,
     val apiId: String
 )
 
 private val CHAT_MODELS = listOf(
-    ChatModel(LlmProvider.Groq, "GPT OSS 120B", "openai/gpt-oss-120b"),
-    ChatModel(LlmProvider.Groq, "Llama 3.3 70B Versatile", "llama-3.3-70b-versatile"),
-    ChatModel(LlmProvider.Groq, "Qwen 3 32B", "qwen/qwen3-32b"),
-    ChatModel(LlmProvider.Groq, "GPT OSS 20B", "openai/gpt-oss-20b"),
-    ChatModel(LlmProvider.GigaChat, "GigaChat", "GigaChat"),
-    ChatModel(LlmProvider.GigaChat, "GigaChat Pro", "GigaChat-Pro"),
-    ChatModel(LlmProvider.GigaChat, "GigaChat MAX", "GigaChat-Max")
+    ChatModel("GigaChat", "GigaChat"),
+    ChatModel("GigaChat Pro", "GigaChat-Pro"),
+    ChatModel("GigaChat MAX", "GigaChat-Max")
 )
 
-private const val DEFAULT_MODEL_ID = "llama-3.3-70b-versatile"
+private const val DEFAULT_MODEL_ID = "GigaChat"
 
 private fun chatModelById(modelId: String): ChatModel =
-    CHAT_MODELS.find { it.apiId == modelId }
-        ?: CHAT_MODELS.first { it.apiId == DEFAULT_MODEL_ID }
+    CHAT_MODELS.find { it.apiId == modelId } ?: CHAT_MODELS.first()
 
 private fun copyTextToClipboard(context: Context, text: String) {
     val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -155,7 +147,7 @@ fun AiAdventApp() {
         mutableStateOf(prefs.getString(KEY_MODEL, DEFAULT_MODEL_ID) ?: DEFAULT_MODEL_ID)
     }
     when (screen) {
-        AppScreen.Main -> GigaChatScreen(
+        AppScreen.Main -> GroqChatScreen(
             maxAnswerTokens = maxAnswerTokens,
             answerJsonFormat = answerJsonFormat,
             systemPrompt = systemPrompt,
@@ -439,7 +431,7 @@ data class ChatTurn(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun GigaChatScreen(
+fun GroqChatScreen(
     maxAnswerTokens: Int,
     answerJsonFormat: Boolean,
     systemPrompt: String,
@@ -521,28 +513,16 @@ fun GigaChatScreen(
                         scope.launch {
                             val startMs = System.currentTimeMillis()
                             val model = chatModelById(selectedModelId)
-                            val result = when (model.provider) {
-                                LlmProvider.GigaChat -> callGigaChat(
-                                    prompt = text,
-                                    maxTokens = maxAnswerTokens,
-                                    jsonFormat = answerJsonFormat,
-                                    systemPrompt = systemPrompt,
-                                    applySystemPrompt = applySystemPrompt,
-                                    temperatureEnabled = temperatureEnabled,
-                                    temperature = temperature,
-                                    model = model.apiId
-                                )
-                                LlmProvider.Groq -> callGroq(
-                                    prompt = text,
-                                    maxTokens = maxAnswerTokens,
-                                    jsonFormat = answerJsonFormat,
-                                    systemPrompt = systemPrompt,
-                                    applySystemPrompt = applySystemPrompt,
-                                    temperatureEnabled = temperatureEnabled,
-                                    temperature = temperature,
-                                    model = model.apiId
-                                )
-                            }
+                            val result = callGigaChat(
+                                prompt = text,
+                                maxTokens = maxAnswerTokens,
+                                jsonFormat = answerJsonFormat,
+                                systemPrompt = systemPrompt,
+                                applySystemPrompt = applySystemPrompt,
+                                temperatureEnabled = temperatureEnabled,
+                                temperature = temperature,
+                                model = model.apiId
+                            )
                             val elapsed = (System.currentTimeMillis() - startMs) / 1000.0
                             val idx = turns.indexOfFirst { it.id == id }
                             if (idx >= 0) {
@@ -695,97 +675,6 @@ private fun formatJsonForDisplay(raw: String): String {
     }.getOrDefault(raw)
 }
 
-// Ключ задаётся в local.properties: GROQ_API_KEY=gsk_...
-private suspend fun callGroq(
-    prompt: String,
-    maxTokens: Int,
-    jsonFormat: Boolean,
-    systemPrompt: String,
-    applySystemPrompt: Boolean,
-    temperatureEnabled: Boolean = false,
-    temperature: Float = 1.0f,
-    model: String = DEFAULT_MODEL_ID
-): GroqResult = withContext(Dispatchers.IO) {
-    val apiKey = BuildConfig.GROQ_API_KEY
-    if (apiKey.isBlank()) {
-        return@withContext GroqResult("Добавьте в local.properties строку GROQ_API_KEY=ваш_ключ (https://console.groq.com/keys)")
-    }
-    try {
-        val messages = JSONArray()
-        val customSystem = systemPrompt.trim()
-        if (applySystemPrompt && customSystem.isNotEmpty()) {
-            messages.put(
-                JSONObject().apply {
-                    put("role", "system")
-                    put("content", customSystem)
-                }
-            )
-        }
-        if (jsonFormat) {
-            messages.put(
-                JSONObject().apply {
-                    put("role", "system")
-                    put(
-                        "content",
-                        "Отвечай только валидным JSON (объект или массив). Без markdown, без текста до или после JSON."
-                    )
-                }
-            )
-        }
-        messages.put(
-            JSONObject().apply {
-                put("role", "user")
-                put("content", prompt)
-            }
-        )
-
-        val requestJson = JSONObject().apply {
-            put("model", model)
-            put("max_tokens", maxTokens)
-            put("messages", messages)
-            if (temperatureEnabled) {
-                put("temperature", temperature.toDouble())
-            }
-            if (jsonFormat) {
-                put(
-                    "response_format",
-                    JSONObject().apply { put("type", "json_object") }
-                )
-            }
-        }
-
-        val body = requestJson.toString().toRequestBody("application/json".toMediaType())
-        val request = Request.Builder()
-            .url("https://api.groq.com/openai/v1/chat/completions")
-            .post(body)
-            .addHeader("Authorization", "Bearer $apiKey")
-            .addHeader("Content-Type", "application/json")
-            .build()
-
-        httpClient.newCall(request).execute().use { response ->
-            val responseText = response.body?.string() ?: ""
-            if (!response.isSuccessful) {
-                val detail = runCatching {
-                    JSONObject(responseText).optJSONObject("error")?.optString("message") ?: responseText
-                }.getOrDefault(responseText)
-                return@withContext GroqResult("Ошибка ${response.code}: $detail")
-            }
-
-            val json = JSONObject(responseText)
-            val text = json
-                .getJSONArray("choices")
-                .getJSONObject(0)
-                .getJSONObject("message")
-                .getString("content")
-                .trim()
-            val totalTokens = json.optJSONObject("usage")?.optInt("total_tokens")
-            GroqResult(text = text, totalTokens = totalTokens)
-        }
-    } catch (e: Exception) {
-        GroqResult("Ошибка: ${e.localizedMessage}")
-    }
-}
-
 private const val GIGACHAT_OAUTH_URL = "https://ngw.devices.sberbank.ru:9443/api/v2/oauth"
 private const val GIGACHAT_CHAT_URL = "https://gigachat.devices.sberbank.ru/api/v1/chat/completions"
 private const val GIGACHAT_SCOPE = "GIGACHAT_API_PERS"
@@ -826,7 +715,6 @@ private fun getGigaChatAccessToken(apiKey: String): String {
         return token
     }
 }
-
 
 // Ключ задаётся в local.properties: GIGACHAT_API_KEY=... (https://developers.sber.ru/portal/products/gigachat-api)
 private suspend fun callGigaChat(
