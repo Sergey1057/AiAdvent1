@@ -827,6 +827,7 @@ private fun getGigaChatAccessToken(apiKey: String): String {
     }
 }
 
+//new
 // Ключ задаётся в local.properties: GIGACHAT_API_KEY=... (https://developers.sber.ru/portal/products/gigachat-api)
 private suspend fun callGigaChat(
     prompt: String,
