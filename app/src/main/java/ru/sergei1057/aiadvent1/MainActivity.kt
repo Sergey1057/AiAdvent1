@@ -155,7 +155,7 @@ fun AiAdventApp() {
         mutableStateOf(prefs.getString(KEY_MODEL, DEFAULT_MODEL_ID) ?: DEFAULT_MODEL_ID)
     }
     when (screen) {
-        AppScreen.Main -> ChatScreen(
+        AppScreen.Main -> GigaChatScreen(
             maxAnswerTokens = maxAnswerTokens,
             answerJsonFormat = answerJsonFormat,
             systemPrompt = systemPrompt,
@@ -439,7 +439,7 @@ data class ChatTurn(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ChatScreen(
+fun GigaChatScreen(
     maxAnswerTokens: Int,
     answerJsonFormat: Boolean,
     systemPrompt: String,

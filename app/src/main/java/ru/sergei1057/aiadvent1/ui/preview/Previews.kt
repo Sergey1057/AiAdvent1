@@ -3,7 +3,7 @@ package ru.sergei1057.aiadvent1.ui.preview
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.tooling.preview.Preview
 import ru.sergei1057.aiadvent1.ChatTurn
-import ru.sergei1057.aiadvent1.ChatScreen
+import ru.sergei1057.aiadvent1.GigaChatScreen
 import ru.sergei1057.aiadvent1.SettingsScreen
 import ru.sergei1057.aiadvent1.ui.theme.AiAdvent1Theme
 
@@ -45,9 +45,9 @@ private fun SettingsScreenGigaChatPreview() {
 
 @Preview(name = "Чат — пустой", showBackground = true, showSystemUi = true)
 @Composable
-private fun ChatScreenEmptyPreview() {
+private fun GigaChatScreenEmptyPreview() {
     AiAdvent1Theme(dynamicColor = false) {
-        ChatScreen(
+        GigaChatScreen(
             maxAnswerTokens = 1024,
             answerJsonFormat = false,
             systemPrompt = "",
@@ -62,9 +62,9 @@ private fun ChatScreenEmptyPreview() {
 
 @Preview(name = "Чат — с историей", showBackground = true, showSystemUi = true)
 @Composable
-private fun ChatScreenWithHistoryPreview() {
+private fun GigaChatScreenWithHistoryPreview() {
     AiAdvent1Theme(dynamicColor = false) {
-        ChatScreen(
+        GigaChatScreen(
             maxAnswerTokens = 1024,
             answerJsonFormat = false,
             systemPrompt = "",
@@ -97,9 +97,9 @@ private fun ChatScreenWithHistoryPreview() {
 
 @Preview(name = "Чат — загрузка", showBackground = true)
 @Composable
-private fun ChatScreenLoadingPreview() {
+private fun GigaChatScreenLoadingPreview() {
     AiAdvent1Theme(dynamicColor = false) {
-        ChatScreen(
+        GigaChatScreen(
             maxAnswerTokens = 1024,
             answerJsonFormat = false,
             systemPrompt = "",
