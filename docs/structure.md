@@ -39,4 +39,10 @@
 
 ## Связь с llm_agent
 
-Ассистент разработчика в `llm_agent` индексирует `REDME.md` и каталог `docs/` для команды `/help`.
+| Инструмент | Назначение |
+|------------|------------|
+| Dev assistant (`/help`) | RAG по `REDME.md` и `docs/` |
+| [File Assistant](file-assistant-agent.md) | Поиск usages, обновление docs по коду (MCP + LLM) |
+| AI PR Review (`.github/workflows/ai-pr-review.yml`) | Авто-ревью pull request |
+
+См. также [file-assistant-agent.md](file-assistant-agent.md).
