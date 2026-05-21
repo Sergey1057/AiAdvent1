@@ -132,7 +132,6 @@ def chat_completion(
     temperature: float = 0.2,
     max_tokens: int = 4096,
 ) -> str:
-
     auth_key = ""
     for name in (
         "GIGACHAT_API_KEY",
